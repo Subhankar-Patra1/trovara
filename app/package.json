@@ -1,0 +1,11 @@
+{
+  "name": "trovara-app",
+  "private": true,
+  "description": "Only the Tauri CLI, for building the installer (scripts\\release.ps1). The app's pages need no build step.",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.1"
+  }
+}
