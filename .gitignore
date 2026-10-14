@@ -11,3 +11,10 @@ Thumbs.db
 # Made by scripts/release.ps1 and scripts/acknowledgements.ps1
 app/src-tauri/resources/Acknowledgements.txt
 app/node_modules/
+
+# Personal planning documents (kept on this PC, not on GitHub)
+/docs/PRD.md
+/docs/TRD.md
+
+# Claude Code skills and settings for this PC (not part of Trovara)
+/.claude/
