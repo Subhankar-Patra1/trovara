@@ -609,6 +609,10 @@ mark.found { background: var(--highlighter); color: #000; border-radius: 2px; pa
 }
 
 /* "Also N matches in your code": code never mixes into normal results, but a row says when it matches */
+/* A misspelled word, searched as the closest word the index has */
+.spelled { grid-column: 1 / -1; margin: 2px 4px 6px; font-size: 12px; color: var(--secondary); }
+.spelled b { color: var(--text); font-weight: 600; }
+
 .code-hint { display: flex; align-items: center; gap: 8px; margin: 8px 2px 2px; padding: 8px 10px; border-radius: 8px;
   font-size: 12px; color: var(--secondary); background: var(--chip); cursor: pointer; grid-column: 1 / -1; }
 .code-hint:hover { color: var(--text); }

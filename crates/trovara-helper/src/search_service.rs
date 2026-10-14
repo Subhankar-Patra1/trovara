@@ -135,6 +135,10 @@ impl State {
                     request["kinds"].as_array().map(|k| k.iter().filter_map(|v| v.as_str().and_then(FileKind::parse)).collect());
                 let limit = request["limit"].as_u64().unwrap_or(40) as usize;
                 let want_meaning = request["meaning"].as_bool().unwrap_or(true);
+                let prefix_last = request["prefix_last"].as_bool().unwrap_or(false);
+                // A word that's in no file is searched as the closest one that is ("beyound" → "beyond").
+                let corrected = if code { None } else { self.searcher.spelled(text, prefix_last).unwrap_or(None) };
+                let text = corrected.as_deref().unwrap_or(text);
                 let started = Instant::now();
                 let mut vector = if want_meaning && !text.trim().is_empty() { self.vector(text, code) } else { None };
                 // Vectors from another model or pipeline must never meet: keyword-only then.
@@ -149,7 +153,7 @@ impl State {
                     }
                 }
                 let embedded = Instant::now();
-                let options = SearchOptions { kinds: kinds.as_ref(), limit, prefix_last: request["prefix_last"].as_bool().unwrap_or(false), ..SearchOptions::default() };
+                let options = SearchOptions { kinds: kinds.as_ref(), limit, prefix_last, ..SearchOptions::default() };
                 let searcher = if code { self.code.as_mut().unwrap() } else { &mut self.searcher };
                 let found = searcher.search(text, vector.as_deref(), &options).map_err(|e| e.to_string())?;
                 let hits: Vec<_> = found.into_iter().filter(|hit| self.shown(&hit.path, code)).collect();
@@ -162,10 +166,16 @@ impl State {
                 if let Some(warning) = warning {
                     reply["warning"] = json!(warning);
                 }
+                if let Some(corrected) = corrected {
+                    reply["corrected"] = json!(corrected);
+                }
                 Ok(reply)
             }
             "embed_ahead" => {
-                let text = request["q"].as_str().unwrap_or_default();
+                let typed = request["q"].as_str().unwrap_or_default();
+                let code = request["code"].as_bool() == Some(true);
+                let corrected = if code { None } else { self.searcher.spelled(typed, false).unwrap_or(None) };
+                let text = corrected.as_deref().unwrap_or(typed);
                 if !text.trim().is_empty() {
                     self.vector(text, request["code"].as_bool() == Some(true));
                 }

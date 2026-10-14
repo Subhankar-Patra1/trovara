@@ -113,7 +113,9 @@ function queryChanged() {
 function show(reply, text, phase) {
   const hits = reply.hits || [];
   const strong = Math.min(reply.strong ?? hits.length, hits.length);
-  state.text = text;
+  // A word that's in no file was searched as the closest one that is ("beyound" → "beyond"): previews mark that.
+  state.corrected = reply.corrected || null;
+  state.text = state.corrected || text;
   state.phase = phase;
   state.strong = hits.slice(0, strong);
   state.weaker = hits.slice(strong);
@@ -236,6 +238,11 @@ function renderList() {
   const nothing = !state.strong.length && !state.weaker.length && !state.codeMatches;
   $list.hidden = nothing;
   if (nothing) return;
+  if (state.corrected) {
+    const note = element("div", "spelled");
+    note.append("Showing results for ", element("b", "", state.corrected));
+    $list.append(note);
+  }
   for (const group of state.groups) {
     if (group.title) $list.append(element("div", "group-title", group.title));
     for (const hit of group.rows) $list.append(state.grid ? cell(hit) : row(hit));

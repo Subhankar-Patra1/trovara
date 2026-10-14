@@ -622,6 +622,138 @@ impl Searcher {
         })
     }
 
+    /// The query with each word that's in no file, not even as the start of one, replaced by the closest word the
+    /// index has: one letter off (two for words of 8 letters or more), the commoner on a tie. "beyound" → "beyond".
+    /// While typing (`prefix_last`) the last word may also be one letter off the start of an indexed word ("beyou" →
+    /// "beyon…"), so results don't vanish mid-word. None when nothing needs correcting (or for code, whose names are
+    /// spelled as they are).
+    pub fn spelled(&self, text: &str, prefix_last: bool) -> Result<Option<String>> {
+        if self.is_code {
+            return Ok(None);
+        }
+        let lower = text.to_lowercase();
+        if lower.len() != text.len() {
+            return Ok(None); // offsets in the lowercase text must be the original's
+        }
+        let words = terms(text);
+        let mut fixed = text.to_string();
+        let mut changed = false;
+        for (index, word) in words.iter().enumerate() {
+            let length = word.chars().count();
+            let last = prefix_last && index + 1 == words.len();
+            if length < 4 || !word.chars().all(char::is_alphabetic) {
+                continue;
+            }
+            if self.is_indexed(&format!("\"{word}\""))? || self.is_indexed(&format!("\"{word}\"*"))? {
+                continue;
+            }
+            let Some(better) = self.closest_word(word, length, last)? else { continue };
+            // Replace the word where it is in the query, keeping everything else as typed.
+            if let Some(at) = find_word(&fixed.to_lowercase(), word) {
+                fixed.replace_range(at..at + word.len(), &better);
+                changed = true;
+            }
+        }
+        Ok(changed.then_some(fixed))
+    }
+
+    /// The indexed word closest to `word` (it starts with the same letter): see `spelled`. The index keeps stems
+    /// ("security" as "secur"), so a word is compared whole and also as a stem plus its own ending ("secruity" →
+    /// "secur" + "ity"); every candidate is checked against the index before it's offered.
+    fn closest_word(&self, word: &str, length: usize, prefix: bool) -> Result<Option<String>> {
+        self.store.db.execute_batch("CREATE VIRTUAL TABLE IF NOT EXISTS temp.fts_words USING fts5vocab(main, 'fts', 'row');")?;
+        let first: String = word.chars().take(1).collect();
+        let next = first.chars().next().and_then(|c| char::from_u32(c as u32 + 1)).map(String::from).unwrap_or_default();
+        let limit = if length >= 8 { 2 } else { 1 };
+        let typed: Vec<char> = word.chars().collect();
+        // (distance, −files, how it was found: 0 whole, 1 stem + ending, 2 a word's start), the word
+        let mut found: Vec<((usize, i64, u8), String)> = Vec::new();
+        let mut statement = self.store.db.prepare("SELECT term, doc FROM temp.fts_words WHERE term >= ?1 AND term < ?2")?;
+        let mut rows = statement.query(rusqlite::params![first, next])?;
+        while let Some(row) = rows.next()? {
+            let term: String = row.get(0)?;
+            let docs: i64 = row.get(1)?;
+            let chars: Vec<char> = term.chars().collect();
+            let n = chars.len();
+            if (n < 3 || n > length + limit || !chars.iter().all(|c| c.is_alphabetic())) && !(prefix && n > length) {
+                continue;
+            }
+            if n <= length + limit {
+                if let Some(d) = edit_distance(&typed, &chars, limit) {
+                    found.push(((d, -docs, 0), term.clone()));
+                }
+                // The stem, then the typed word's own ending.
+                // The stem covers most of the word: an ending of at most 3 letters.
+                for k in n.saturating_sub(1).max(length.saturating_sub(3)).max(4)..=(n + 1).min(length.saturating_sub(1)) {
+                    if edit_distance(&typed[..k], &chars, limit).is_some() {
+                        let whole: Vec<char> = chars.iter().chain(typed[k..].iter()).copied().collect();
+                        if let Some(d) = edit_distance(&typed, &whole, limit) {
+                            found.push(((d, -docs, 1), whole.into_iter().collect()));
+                        }
+                    }
+                }
+            }
+            // While typing: one letter off the start of a longer word (that start a letter shorter, as long, or longer).
+            if prefix && n > length {
+                for k in [length - 1, length, length + 1] {
+                    if k >= 4 && k < n {
+                        if let Some(d) = edit_distance(&typed, &chars[..k], 1) {
+                            found.push(((d, -docs, 2), chars[..k].iter().collect()));
+                        }
+                    }
+                }
+            }
+        }
+        found.retain(|(key, _)| key.0 > 0);
+        found.sort();
+        // The first few that keyword search really finds, each as it's written in the files ("certificate", not the
+        // stem's "certifate"); the one written closest to what was typed wins ("invoice", not "invoke" for "invioce").
+        type Offer = ((usize, (usize, i64, u8)), String);   // (written distance, the candidate's key), the word
+        let mut offers: Vec<Offer> = Vec::new();
+        for (key, candidate) in found.into_iter().take(40) {
+            if offers.len() >= 6 {
+                break;
+            }
+            if key.2 == 2 {
+                if self.is_indexed(&format!("\"{candidate}\"*"))? {
+                    offers.push(((key.0, key), candidate));
+                }
+                continue;
+            }
+            if self.is_indexed(&format!("\"{candidate}\""))? {
+                let written = self.written_as(&candidate, word)?.unwrap_or(candidate);
+                let distance = edit_distance(&typed, &written.chars().collect::<Vec<_>>(), 4).unwrap_or(9);
+                offers.push(((distance, key), written));
+            }
+        }
+        Ok(offers.into_iter().min().map(|(_, w)| w))
+    }
+
+    /// The word as it's written in the files that `candidate` matches, the one closest to what was typed.
+    fn written_as(&self, candidate: &str, typed: &str) -> Result<Option<String>> {
+        let typed: Vec<char> = typed.chars().collect();
+        let start: String = typed.iter().take(3).collect();
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        let mut statement = self.store.db.prepare("SELECT coalesce(original, body) FROM fts WHERE fts MATCH ?1 LIMIT 40")?;
+        let mut rows = statement.query([format!("\"{candidate}\"")])?;
+        while let Some(row) = rows.next()? {
+            let text: Option<String> = row.get(0)?;
+            for w in text.unwrap_or_default().to_lowercase().split(|c: char| !c.is_alphabetic()) {
+                if w.starts_with(&start) && w.chars().count() >= 3 {
+                    *counts.entry(w.to_string()).or_default() += 1;
+                }
+            }
+        }
+        let best = counts
+            .into_iter()
+            .filter_map(|(w, n)| edit_distance(&typed, &w.chars().collect::<Vec<_>>(), 3).map(|d| ((d, std::cmp::Reverse(n)), w)))
+            .min();
+        match best {
+            Some((_, w)) if self.is_indexed(&format!("\"{w}\""))? => Ok(Some(w)),
+            _ => Ok(None),
+        }
+    }
+
     /// Whether keyword search finds `pattern` in any file.
     fn is_indexed(&self, pattern: &str) -> Result<bool> {
         Ok(self
@@ -635,6 +767,46 @@ impl Searcher {
             .optional()?
             .is_some())
     }
+}
+
+/// The byte offset of `word` in `text` as a whole word (both lowercase).
+fn find_word(text: &str, word: &str) -> Option<usize> {
+    let mut from = 0;
+    while let Some(i) = text[from..].find(word).map(|i| i + from) {
+        let before = text[..i].chars().next_back().is_none_or(|c| !c.is_alphanumeric());
+        let after = text[i + word.len()..].chars().next().is_none_or(|c| !c.is_alphanumeric());
+        if before && after {
+            return Some(i);
+        }
+        from = i + word.len();
+    }
+    None
+}
+
+/// The edit distance between `a` and `b` (insertions, deletions, substitutions, and swapped neighbours), or None when
+/// it's more than `limit`.
+fn edit_distance(a: &[char], b: &[char], limit: usize) -> Option<usize> {
+    if a.len().abs_diff(b.len()) > limit {
+        return None;
+    }
+    let (n, m) = (a.len(), b.len());
+    let mut d = vec![vec![0usize; m + 1]; n + 1];
+    for (i, row) in d.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for (j, cell) in d[0].iter_mut().enumerate() {
+        *cell = j;
+    }
+    for i in 1..=n {
+        for j in 1..=m {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            d[i][j] = (d[i - 1][j] + 1).min(d[i][j - 1] + 1).min(d[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                d[i][j] = d[i][j].min(d[i - 2][j - 2] + 1);
+            }
+        }
+    }
+    (d[n][m] <= limit).then_some(d[n][m])
 }
 
 /// How many of `hits` (best first) are strong: scoring at least `ratio` × the top hit. The rest pass the gates but
@@ -796,6 +968,16 @@ mod tests {
 
     use super::*;
     use crate::store::Candidate;
+
+    #[test]
+    fn spelling_distance() {
+        let c = |s: &str| s.chars().collect::<Vec<_>>();
+        assert_eq!(edit_distance(&c("beyound"), &c("beyond"), 1), Some(1));
+        assert_eq!(edit_distance(&c("recieve"), &c("receive"), 1), Some(1)); // swapped neighbours
+        assert_eq!(edit_distance(&c("beyound"), &c("behind"), 1), None);
+        assert_eq!(find_word("see beyound it", "beyound"), Some(4));
+        assert_eq!(find_word("beyounds beyound", "beyound"), Some(9));
+    }
 
     fn add(
         store: &IndexStore,
