@@ -8,9 +8,10 @@
 <body class="window">
   <main id="panel" class="panel">
     <header class="field">
-      <svg class="glass" viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="10" cy="10" r="6.5"/><path d="M15 15 L20.5 20.5"/>
-      </svg>
+      <span class="search-mark" aria-hidden="true"><span class="search-orbit">
+        <svg class="glass" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6.5"/><path d="M15 15 L20.5 20.5"/></svg>
+        <span class="search-color"></span>
+      </span><span class="search-ai"></span></span>
       <input id="query" type="text" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Search"
              placeholder="Describe it: “payment error screenshot”, “zebra in a video”…">
       <span id="activity" class="activity" hidden></span>
@@ -25,6 +26,16 @@
       <span id="keys" class="keys"></span>
     </footer>
   </main>
+  <script src="vendor/highlight/highlight.min.js"></script>
+  <script src="vendor/highlight/languages/powershell.min.js"></script>
+  <script src="vendor/highlight/languages/dockerfile.min.js"></script>
+  <script src="vendor/highlight/languages/dart.min.js"></script>
+  <script src="vendor/highlight/languages/scala.min.js"></script>
+  <script src="vendor/highlight/languages/protobuf.min.js"></script>
+  <script src="vendor/highlight/languages/elixir.min.js"></script>
+  <script src="vendor/highlight/languages/haskell.min.js"></script>
+  <script src="markdown.js"></script>
+  <script src="preview.js"></script>
   <script src="panel.js"></script>
 </body>
 </html>

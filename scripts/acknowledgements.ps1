@@ -101,6 +101,9 @@ if (Test-Path $pdfiumLicenses) {
     }
 }
 
+Section "highlight.js 11.11.1 (BSD-3-Clause), https://highlightjs.org: code colours in previews"
+AddFile (Join-Path $root "app\ui\vendor\highlight\LICENSE")
+
 Section "Microsoft Visual C++ runtime"
 Add "msvcp140.dll, vcruntime140.dll, vcruntime140_1.dll and vcomp140.dll are Microsoft Visual C++ Redistributable files,"
 Add "shipped with Trovara under the Visual Studio license terms for distributable code."

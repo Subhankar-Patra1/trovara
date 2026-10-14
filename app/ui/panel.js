@@ -12,7 +12,7 @@ const fileURL = (path) => tauri.core.convertFileSrc(path);
 const TYPING_PAUSE = 120;          // ms after the last keystroke until the meaning results show
 const ROWS_PER_GROUP = 6;
 const FIELD_HEIGHT = 56;
-const PANEL_HEIGHT = 480;
+const PANEL_HEIGHT = 10000;     // "as tall as results may be": the app sizes it for the screen (up to 640)
 const WEAKER = "\u0000weaker";     // the selectable row that folds and unfolds the weaker matches
 const WINDOW = document.body.classList.contains("window");   // the search window, not the panel
 const FILE_MANAGER = "Explorer";
@@ -55,6 +55,7 @@ const state = {
   indexing: null,        // {done, total} while the index helper works through new files
   filter: "all",         // the window's filter
   grid: false,           // the window shows pictures in a grid
+  codeMatches: 0,        // the words also match this many stretches of code (a hint row, Tab to search code)
 };
 let debugPending = false;
 
@@ -65,6 +66,7 @@ function queryChanged() {
   clearTimeout(state.timer);
   state.navigated = false;
   state.error = null;
+  closeViewer();
   const typed = $query.value.trim();
   const filter = FILTERS.find(([id]) => id === state.filter) ?? FILTERS[0];
   const prefixed = /^code:/i.test(typed);
@@ -73,6 +75,7 @@ function queryChanged() {
   const kinds = code ? null : filter[2];
   const limit = WINDOW ? 120 : 40;
   state.isCode = code;
+  state.codeMatches = 0;
   if (!typed || (code && !text)) {
     show({ hits: [], strong: 0 }, text, typed || (code && WINDOW) ? "codeHint" : "empty");
     return;
@@ -94,6 +97,16 @@ function queryChanged() {
         if (debugPending) report();
       })
       .catch(failed);
+    // Code never mixes into these results, but when the words are in code too, a row says so (PRD F-COD-11).
+    if (!code) {
+      ask({ op: "search", q: text, code: true, meaning: false, limit: 5 })
+        .then((reply) => {
+          if (generation !== state.generation || !reply.hits?.length) return;
+          state.codeMatches = reply.hits.length;
+          renderList();
+        })
+        .catch(() => {});
+    }
   }, TYPING_PAUSE);
 }
 
@@ -168,7 +181,7 @@ function openSelected() {
     invoke("open_code", { path: hit.path, line }).catch(failed);
     return;
   }
-  const at = ["page", "page_image", "frame", "audio"].includes(hit.segment) && hit.loc != null;
+  const at = ["page", "page_image", "frame", "audio", "subtitle"].includes(hit.segment) && hit.loc != null;
   invoke("open_path", { path: hit.path, kind: at ? hit.kind : null, loc: at ? hit.loc : null }).catch(failed);
 }
 
@@ -220,7 +233,7 @@ function render() {
 function renderList() {
   $list.replaceChildren();
   $list.classList.toggle("grid", state.grid);
-  const nothing = !state.strong.length && !state.weaker.length;
+  const nothing = !state.strong.length && !state.weaker.length && !state.codeMatches;
   $list.hidden = nothing;
   if (nothing) return;
   for (const group of state.groups) {
@@ -235,6 +248,15 @@ function renderList() {
     fold.onclick = toggleWeaker;
     $list.append(fold);
     if (state.showWeaker) for (const hit of state.weaker) $list.append(state.grid ? cell(hit) : row(hit));
+  }
+  if (state.codeMatches && !state.isCode) {
+    const hint = element("div", "code-hint");
+    hint.innerHTML = ICONS.code;
+    const count = state.codeMatches >= 5 ? "5+" : String(state.codeMatches);
+    hint.append(element("span", "", `Also ${count} ${state.codeMatches === 1 ? "match" : "matches"} in your code`),
+                element("kbd", "", "Tab"));
+    hint.onclick = searchCode;
+    $list.append(hint);
   }
   $list.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
 }
@@ -321,7 +343,18 @@ function renderPreview() {
   }
   const hit = selectedHit();
   if (!hit) return;
-  $preview.append(picture(hit), facts(hit));
+  const shown = picture(hit);
+  if (canView(hit)) {
+    // Space, a click on the picture, or this: the file large over the panel (the viewer).
+    const expand = element("button", "expand");
+    expand.type = "button";
+    expand.title = "View large (Space)";
+    expand.setAttribute("aria-keyshortcuts", "Space");
+    expand.innerHTML = ICONS.expand;
+    expand.onclick = (event) => { event.stopPropagation(); openViewer(hit); };
+    shown.append(expand);
+  }
+  $preview.append(shown, facts(hit));
 }
 
 /// The big picture: the photo or screenshot, the frame at the moment (it plays from there), the page, what's heard
@@ -334,12 +367,25 @@ function picture(hit) {
   const big = WINDOW ? 1600 : 1024;
   switch (hit.kind) {
     case "image":
-    case "screenshot":
-      if (SHOWN_AS_IS.has(extensionOf(hit.path))) image.src = fileURL(hit.path);
-      else rendered(hit.path, "image", null, big).then((path) => { image.src = fileURL(path); }).catch(() => {});
+    case "screenshot": {
+      // A screenshot whose words matched: the helper marks them yellow where OCR reads them (F-PRE-10).
+      const marking = hit.kind === "screenshot" && hit.found?.length ? { q: state.text, words: hit.found } : null;
+      frame.onclick = () => openViewer(hit);
+      if (SHOWN_AS_IS.has(extensionOf(hit.path)) && !marking) image.src = fileURL(hit.path);
+      else {
+        rendered(hit.path, "image", null, big, marking ?? undefined)
+          .then((path) => { image.src = fileURL(path); })
+          .catch(() => { if (SHOWN_AS_IS.has(extensionOf(hit.path))) image.src = fileURL(hit.path); });
+      }
       return frame;
+    }
     case "pdf":
-      rendered(hit.path, "pdf", hit.loc ?? 1, big).then((path) => { image.src = fileURL(path); }).catch(() => {});
+      // The page with the found words marked yellow, zoomed to the part around them in the preview's shape
+      // (F-PRE-04); a click shows the whole page large.
+      frame.onclick = () => openViewer(hit);
+      rendered(hit.path, "pdf", hit.loc ?? 1, big, { q: state.text, words: hit.found ?? [], aspect: previewAspect() })
+        .then((path) => { image.src = fileURL(path); })
+        .catch(() => {});
       return frame;
     case "video": {
       // The frame at the moment, its time on it; a click plays the video from there.
@@ -359,7 +405,17 @@ function picture(hit) {
         video.onerror = () => openSelected();
         frame.replaceChildren(video);
       };
-      return frame;
+      if (hit.segment !== "subtitle") return frame;
+      // What's said there, under the frame, the words marked (PRD F-RD-13).
+      const said = element("div", "passage said");
+      said.dir = "auto";
+      said.textContent = hit.excerpt?.replace(/[«»]/g, "") ?? "";
+      ask({ op: "text", segment: hit.segment_id, q: state.text, words: hit.found ?? [] })
+        .then((reply) => { if (reply.text) TrovaraPreview.passage(said, reply); })
+        .catch(() => {});
+      const both = element("div", "picture with-said");
+      both.append(frame, said);
+      return both;
     }
     case "audio": {
       const audio = element("div", "audio-picture");
@@ -372,23 +428,44 @@ function picture(hit) {
       frame.replaceChildren(audio);
       return frame;
     }
-    default: {
-      const passage = element("div", "passage" + (hit.kind === "code" ? " code" : ""));
-      passage.textContent = (hit.excerpt ?? "").replace(/[«»]/g, "");
-      ask({ op: "text", segment: hit.segment_id, code: state.isCode })
-        .then((reply) => {
-          if (!reply.text) return;
-          if (hit.kind === "code" && hit.segment === "lines" && hit.loc != null) {
-            passage.innerHTML = numbered(reply.text, state.text, Math.trunc(hit.loc), hit.focus);
-            passage.querySelector(".focus")?.scrollIntoView({ block: "center" });
-          } else {
-            passage.innerHTML = highlighted(reply.text, state.text);
-          }
-        })
-        .catch(() => {});
-      return passage;
-    }
+    default:
+      return textPreview(hit);
   }
+}
+
+/// The part of a file that matched, its words marked yellow and the preview opened at the first (PRD §6.1b):
+/// Markdown formatted, code coloured with its line numbers, anything else as a passage on a page-like card.
+function textPreview(hit) {
+  const markdown = TrovaraPreview.isMarkdown(hit.path);
+  const lines = hit.kind === "code" && hit.segment === "lines" && hit.loc != null;
+  const passage = element("div", "passage" + (markdown ? " markdown" : lines ? " code" : ""));
+  passage.dir = "auto"; // Arabic and Hebrew read from the right (F-PRE-08)
+  passage.textContent = (hit.excerpt ?? "").replace(/[«»]/g, "");
+  const part = partOf(hit);
+  const box = element("div", "passage-box");
+  box.append(passage);
+  if (part) box.append(element("span", "part", part));
+  ask({ op: "text", segment: hit.segment_id, code: state.isCode, q: state.text, words: hit.found ?? [] })
+    .then((reply) => {
+      if (!reply.text) return;
+      if (markdown) TrovaraPreview.markdown(passage, reply);
+      else if (lines) TrovaraPreview.code(passage, reply, hit.path, Math.trunc(hit.loc), hit.focus);
+      else TrovaraPreview.passage(passage, reply);
+    })
+    .catch(() => {});
+  return box;
+}
+
+/// The shape (width / height) the preview's picture has: the room left above the file's facts.
+function previewAspect() {
+  const width = $preview.clientWidth - 32, height = $preview.clientHeight - 30 - 150;
+  return width > 0 && height > 0 ? Math.round((width / height) * 20) / 20 : 1.5;
+}
+
+/// "Part 2 of 5", when a long document matched in one of its parts.
+function partOf(hit) {
+  const parts = Number(hit.info?.chunks);
+  return hit.segment === "chunk" && hit.loc != null && parts > 1 ? `Part ${Math.trunc(hit.loc)} of ${parts}` : null;
 }
 
 function facts(hit) {
@@ -405,11 +482,19 @@ function facts(hit) {
     box.append(words);
   }
   const buttons = element("div", "buttons");
-  const open = element("button", "", hit.kind === "code" ? `Open in ${codeEditor()}` : "Open");
+  const open = element("button", "primary", hit.kind === "code" ? `Open in ${codeEditor()}` : "Open");
+  open.type = "button";
+  open.title = "Open the file (Enter)";
+  open.setAttribute("aria-keyshortcuts", "Enter");
   open.onclick = openSelected;
   const reveal = element("button", "", `Show in ${FILE_MANAGER}`);
+  reveal.type = "button";
+  reveal.title = `Show the file in ${FILE_MANAGER} (Ctrl+Enter)`;
+  reveal.setAttribute("aria-keyshortcuts", "Control+Enter");
   reveal.onclick = revealSelected;
   const copy = element("button", "", "Copy");
+  copy.type = "button";
+  copy.setAttribute("aria-keyshortcuts", "Control+C");
   copy.title = "Ctrl+C: the file, to paste anywhere";
   copy.onclick = () => copySelected(false);
   buttons.append(open, reveal, copy);
@@ -430,8 +515,8 @@ function renderFooter() {
   // Results while indexing are partial: say so where they're counted.
   if (state.indexing && !state.error) summary += ` · still indexing (${state.indexing.done} of ${state.indexing.total})`;
   $summary.textContent = summary;
-  $keys.textContent = WINDOW ? `↩ Open   Ctrl+↩ Show in ${FILE_MANAGER}   Ctrl+C Copy`
-                             : "↩ Open   Ctrl+↩ Show   Ctrl+C Copy   Ctrl+O Window";
+  $keys.textContent = WINDOW ? `↩ Open   Space View   Ctrl+↩ Show in ${FILE_MANAGER}   Ctrl+C Copy`
+                             : "↩ Open   Space View   Ctrl+↩ Show   Ctrl+C Copy   Ctrl+O Window";
 }
 
 function message(title, text) {
@@ -450,6 +535,7 @@ function placeOf(hit) {
     case "page_image": return `p. ${Math.trunc(hit.loc)}`;
     case "frame": return clock(hit.loc);
     case "audio": return hit.kind === "video" ? `♪ ${clock(hit.loc)}` : clock(hit.loc);
+    case "subtitle": return `“ ${clock(hit.loc)}`;
     case "lines": {
       const first = Math.trunc(hit.loc), last = Math.trunc(hit.loc_end ?? hit.loc);
       return first === last ? `L${first}` : `L${first}–${last}`;
@@ -469,6 +555,9 @@ function span(hit) {
 /// Why it's here, in a few words: "Matches the picture", "Matches the frame at 0:06".
 function reasonOf(hit) {
   const meaning = (hit.z ?? 0) >= 2, words = hit.keyword_rank != null;
+  if (hit.segment === "subtitle" && hit.loc != null) {
+    return meaning ? `Matches what's said at ${clock(hit.loc)}` : `Says your words at ${clock(hit.loc)}`;
+  }
   if (!meaning) return words ? "Has your words" : "Matches its name";
   const at = hit.loc != null ? clock(hit.loc) : "";
   const page = hit.loc != null ? `page ${Math.trunc(hit.loc)}` : "a page";
@@ -551,24 +640,6 @@ function marked(excerpt) {
   return escaped(excerpt).replace(/«([^»]*)»/g, "<b>$1</b>");
 }
 
-/// A passage with the query's words marked where they start a word.
-function highlighted(text, query) {
-  const words = [...new Set(query.toLowerCase().split(/[^\p{L}\p{N}_]+/u).filter((word) => word.length > 1))];
-  let html = escaped(text);
-  if (!words.length) return html;
-  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])(${words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "giu");
-  return html.replace(pattern, "<mark>$1</mark>");
-}
-
-/// A stretch of code with its line numbers (from `first`), the line it opens at (`focus`) marked.
-function numbered(text, query, first, focus) {
-  return text.split("\n").map((line, index) => {
-    const number = first + index;
-    const body = highlighted(line, query) || " ";
-    return `<div class="line${number === focus ? " focus" : ""}"><span class="ln">${number}</span>${body}</div>`;
-  }).join("");
-}
-
 function escaped(text) {
   return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
@@ -599,11 +670,12 @@ function codeEditor() {
   return editorName;
 }
 
-/// The helper's JPEG of a page, a frame or a picture, asked for once per file and place.
+/// The helper's JPEG of a page, a frame or a picture, asked for once per file and place (and, for a marked PDF
+/// page, per query: `marking` is {q, words}).
 const renders = new Map();
-function rendered(path, kind, loc, pixels) {
-  const key = `${path}|${kind}|${loc}|${pixels}`;
-  if (!renders.has(key)) renders.set(key, ask({ op: "render", path, kind, loc, pixels }).then((reply) => reply.image));
+function rendered(path, kind, loc, pixels, marking) {
+  const key = `${path}|${kind}|${loc}|${pixels}|${marking ? JSON.stringify(marking) : ""}`;
+  if (!renders.has(key)) renders.set(key, ask({ op: "render", path, kind, loc, pixels, ...(marking ?? {}) }).then((reply) => reply.image));
   return renders.get(key);
 }
 
@@ -617,19 +689,236 @@ const ICONS = {
   audio: '<svg viewBox="0 0 24 24"><path d="M3 12 H5 M7 8 V16 M10 5 V19 M13 9 V15 M16 6 V18 M19 10 V14 M21 12 H22"/></svg>',
   video: '<svg viewBox="0 0 24 24"><path d="M4 6 H15 V18 H4 Z M15 10 L20 7 V17 L15 14"/></svg>',
   image: '<svg viewBox="0 0 24 24"><path d="M4 5 H20 V19 H4 Z M4 16 L9 11 L13 15 L16 12 L20 16"/></svg>',
+  expand: '<svg viewBox="0 0 24 24"><path d="M14 4 H20 V10 M20 4 L13.5 10.5 M10 20 H4 V14 M4 20 L10.5 13.5"/></svg>',
+  close: '<svg viewBox="0 0 24 24"><path d="M6 6 L18 18 M18 6 L6 18"/></svg>',
+  back: '<svg viewBox="0 0 24 24"><path d="M15 5 L8 12 L15 19"/></svg>',
+  next: '<svg viewBox="0 0 24 24"><path d="M9 5 L16 12 L9 19"/></svg>',
 };
 ICONS.screenshot = ICONS.image;
 
+// MARK: The viewer (PRD F-PRE-11): the file large over the panel or window, like Quick Look
+
+/// What's open in the viewer: {hit, page, zoom} (page: a PDF's page shown), or null.
+let viewing = null;
+const $viewer = element("div", "viewer");
+$viewer.hidden = true;
+$viewer.setAttribute("role", "dialog");
+$viewer.setAttribute("aria-label", "Viewer");
+document.body.append($viewer);
+
+function canView(hit) {
+  return hit.kind !== "audio" && hit.kind !== "video";
+}
+
+function openViewer(hit) {
+  if (!hit || !canView(hit)) return;
+  viewing = { hit, page: Math.max(1, Math.trunc(hit.loc ?? 1)), zoom: 1 };
+  renderViewer();
+}
+
+function closeViewer() {
+  if (!viewing) return;
+  viewing = null;
+  $viewer.hidden = true;
+  $viewer.replaceChildren();
+}
+
+function renderViewer() {
+  const { hit } = viewing;
+  const pages = Number(hit.info?.pages) || null;
+  const bar = element("div", "viewer-bar");
+  const title = element("div", "viewer-title", nameOf(hit.path));
+  bar.append(title);
+  if (hit.kind === "pdf") {
+    const back = viewerButton(ICONS.back, "Previous page (←)", () => turnPage(-1));
+    const next = viewerButton(ICONS.next, "Next page (→)", () => turnPage(1));
+    back.disabled = viewing.page <= 1;
+    next.disabled = pages != null && viewing.page >= pages;
+    bar.append(back, element("span", "viewer-page", pages ? `Page ${viewing.page} of ${pages}` : `Page ${viewing.page}`), next);
+  }
+  const zoom = element("span", "viewer-zoom", `${Math.round(viewing.zoom * 100)}%`);
+  bar.append(viewerButton("−", "Smaller (−)", () => zoomBy(1 / 1.25)), zoom, viewerButton("+", "Larger (+)", () => zoomBy(1.25)),
+             viewerButton(ICONS.close, "Close (Esc)", closeViewer));
+  const stage = element("div", "viewer-stage");
+  stage.style.setProperty("--zoom", viewing.zoom);
+  stage.onclick = (event) => { if (event.target === stage) closeViewer(); };
+  stage.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    zoomBy(event.deltaY < 0 ? 1.1 : 1 / 1.1);
+  }, { passive: false });
+  if (PICTURES.has(hit.kind) || hit.kind === "pdf") {
+    const image = element("img", "viewer-image" + (hit.kind === "pdf" ? " page" : ""));
+    image.alt = "";
+    const marking = hit.found?.length && (hit.kind === "pdf" || hit.kind === "screenshot")
+      ? { q: state.text, words: hit.found, ...(hit.kind === "pdf" ? { zoom: false } : {}) } : null;
+    // Sharp at the screen's own pixels: up to the helper's 3000 for a page or a marked picture.
+    const pixels = Math.min(3000, Math.round(Math.max(screen.width, screen.height) * (window.devicePixelRatio || 1)));
+    if (hit.kind !== "pdf" && SHOWN_AS_IS.has(extensionOf(hit.path)) && !marking) image.src = fileURL(hit.path);
+    else {
+      const shown = viewing;
+      rendered(hit.path, hit.kind === "pdf" ? "pdf" : "image", hit.kind === "pdf" ? viewing.page : null, pixels,
+               marking ?? (hit.kind === "pdf" ? { zoom: false } : undefined))
+        .then((path) => { if (viewing === shown) image.src = fileURL(path); })
+        .catch(() => { if (hit.kind !== "pdf" && SHOWN_AS_IS.has(extensionOf(hit.path))) image.src = fileURL(hit.path); });
+    }
+    stage.append(image);
+  } else {
+    const text = textPreview(hit);
+    text.classList.add("viewer-text");
+    stage.append(text);
+  }
+  $viewer.replaceChildren(bar, stage);
+  $viewer.hidden = false;
+  stage.focus?.();
+}
+
+function viewerButton(icon, title, onclick) {
+  const button = element("button", "viewer-button");
+  button.type = "button";
+  button.title = title;
+  button.innerHTML = icon;
+  button.onclick = onclick;
+  return button;
+}
+
+function zoomBy(factor) {
+  viewing.zoom = Math.min(8, Math.max(0.25, viewing.zoom * factor));
+  $viewer.querySelector(".viewer-stage")?.style.setProperty("--zoom", viewing.zoom);
+  const label = $viewer.querySelector(".viewer-zoom");
+  if (label) label.textContent = `${Math.round(viewing.zoom * 100)}%`;
+}
+
+function turnPage(step) {
+  const pages = Number(viewing.hit.info?.pages) || Infinity;
+  const page = Math.min(pages, Math.max(1, viewing.page + step));
+  if (page === viewing.page) return;
+  viewing.page = page;
+  viewing.zoom = 1;
+  renderViewer();
+}
+
+/// The viewer's keys; true when the key was its.
+function viewerKey(event) {
+  switch (event.key) {
+    case "Escape":
+    case " ":
+      closeViewer();
+      return true;
+    case "ArrowLeft":
+    case "ArrowRight":
+      if (viewing.hit.kind !== "pdf") return false;
+      turnPage(event.key === "ArrowRight" ? 1 : -1);
+      return true;
+    case "+":
+    case "=":
+      zoomBy(1.25);
+      return true;
+    case "-":
+    case "_":
+      zoomBy(1 / 1.25);
+      return true;
+    case "0":
+      if (!event.ctrlKey) return false;
+      zoomBy(1 / viewing.zoom);
+      return true;
+    case "ArrowDown":
+    case "ArrowUp":
+    case "PageDown":
+    case "PageUp": {
+      // They scroll what's shown, not the results under it.
+      const stage = $viewer.querySelector(".viewer-stage");
+      const step = event.key.startsWith("Page") ? stage.clientHeight * 0.9 : 60;
+      stage.scrollBy({ top: event.key.endsWith("Down") ? step : -step });
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
 // MARK: Keys and events
 
+// Typing motion is independent of the search timer and helper responses.
+const searchMark = document.querySelector(".search-mark");
+const searchOrbit = searchMark.querySelector(".search-orbit");
+const searchSpark = searchMark.querySelector(".search-ai");
+const searchMotionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+let searchMotionTimer = null;
+let searchReturnAnimations = [];
+
+function stopSearchMotion(immediate = false) {
+  clearTimeout(searchMotionTimer);
+  for (const animation of searchReturnAnimations) animation.cancel();
+  searchReturnAnimations = [];
+  if (!searchMark.classList.contains("is-typing")) return;
+  const ringPose = getComputedStyle(searchOrbit).transform;
+  const sparkPose = getComputedStyle(searchSpark).transform;
+  const sparkOpacity = getComputedStyle(searchSpark).opacity;
+  searchMark.classList.remove("is-typing");
+  if (immediate || searchMotionPreference.matches) return;
+  const options = { duration: 260, easing: "cubic-bezier(.2, .8, .2, 1)" };
+  searchReturnAnimations = [
+    searchOrbit.animate([{ transform: ringPose }, { transform: "none" }], options),
+    searchSpark.animate([{ transform: sparkPose, opacity: sparkOpacity },
+      { transform: "translate3d(0, 0, 0) scale(.2)", opacity: 0 }], options),
+  ];
+}
+
+function animateSearchTyping() {
+  if (!$query.value.trim() || searchMotionPreference.matches) {
+    stopSearchMotion(true);
+    return;
+  }
+  for (const animation of searchReturnAnimations) animation.cancel();
+  searchReturnAnimations = [];
+  searchMark.classList.add("is-typing");
+  clearTimeout(searchMotionTimer);
+  searchMotionTimer = setTimeout(stopSearchMotion, 900);
+}
+
+$query.addEventListener("input", animateSearchTyping);
+$query.addEventListener("blur", () => stopSearchMotion());
+searchMotionPreference.addEventListener("change", () => stopSearchMotion(true));
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopSearchMotion(true); });
+window.addEventListener("pagehide", () => stopSearchMotion(true));
+
 $query.addEventListener("input", queryChanged);
+
+/// The same words, in code (the hint row, or Tab): the search window's Code filter, the panel's "code:" prefix.
+function searchCode() {
+  if (WINDOW) {
+    state.filter = "code";
+    renderChips();
+  } else {
+    $query.value = `code: ${state.text}`;
+  }
+  queryChanged();
+  $query.focus();
+}
 
 document.addEventListener("keydown", (event) => {
   if (event.isComposing) return; // an input method is composing: its keys
   const modifier = event.ctrlKey;
+  if (viewing && !event.altKey) {
+    if (viewerKey(event)) { event.preventDefault(); return; }
+    if (event.key.length === 1 && !modifier) closeViewer(); // typing goes back to the search
+  } else if (event.key === " " && !modifier && !event.altKey && !event.shiftKey
+             && (state.navigated || document.activeElement !== $query) && selectedHit() && canView(selectedHit())) {
+    // Space after the arrows (or with the field not focused) views the result large; else it's a space typed.
+    event.preventDefault();
+    openViewer(selectedHit());
+    return;
+  }
+  if (event.key === "Tab" && !event.shiftKey && !modifier && !event.altKey && state.codeMatches && !state.isCode) {
+    event.preventDefault();
+    searchCode();
+    return;
+  }
   switch (event.key) {
     case "Escape":
       event.preventDefault();
+      stopSearchMotion(true);
       if (!WINDOW) invoke("hide_panel").catch(() => {});
       else if ($query.value) searchFor("");
       else invoke("close_window").catch(() => {});
@@ -648,6 +937,8 @@ document.addEventListener("keydown", (event) => {
       move(event.key === "ArrowRight" ? 1 : -1);
       break;
     case "Enter":
+      // Let a focused action button run its own click handler.
+      if (!modifier && event.target.closest("button")) return;
       event.preventDefault();
       if (modifier) revealSelected();
       else if (state.selection === WEAKER) toggleWeaker();
