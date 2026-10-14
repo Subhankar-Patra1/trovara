@@ -1,0 +1,4 @@
+# Patches must keep LF line endings or git apply rejects them.
+*.patch -text
+*.ps1 text eol=crlf
+*.rs text eol=lf

@@ -1,0 +1,13 @@
+/target/
+/vendor/
+/third_party/llama.cpp/
+/app/src-tauri/target/
+/app/src-tauri/gen/
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# Made by scripts/release.ps1 and scripts/acknowledgements.ps1
+app/src-tauri/resources/Acknowledgements.txt
+app/node_modules/
