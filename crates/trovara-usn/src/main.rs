@@ -15,6 +15,10 @@
 //!   `from`. "reset": the journal was recreated or has moved past `from`: crawl everything.
 //! It reads names only to tell which folders changed, never file contents, and reports only folders inside the roots.
 
+// No console: the scheduled task starts it when the app opens and quits, and a console program would flash a cmd
+// window each time. (It writes its answer to a file; --install and --uninstall report through their exit code.)
+#![windows_subsystem = "windows"]
+
 #[cfg(windows)]
 mod journal;
 

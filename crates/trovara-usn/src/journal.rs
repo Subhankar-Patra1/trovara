@@ -50,7 +50,7 @@ pub fn install() -> i32 {
     };
     // On demand only (a start date in the past and no repeat), with the highest privileges the user has, as the user,
     // only while they're signed in (/IT: no password stored).
-    let status = std::process::Command::new("schtasks")
+    let status = hidden("schtasks")
         .args([
             "/Create",
             "/F",
@@ -85,7 +85,7 @@ pub fn install() -> i32 {
 }
 
 pub fn uninstall() -> i32 {
-    let status = std::process::Command::new("schtasks")
+    let status = hidden("schtasks")
         .args(["/Delete", "/F", "/TN", &task_name()])
         .status();
     match status {
@@ -369,4 +369,12 @@ mod tests {
         assert_eq!(valid_volume(r"\\server"), None);
         assert_eq!(key(r"\\?\C:\Users\Me\"), r"c:\users\me");
     }
+}
+
+/// A command that opens no console window (this program has none, so a console program it starts would get its own).
+fn hidden(program: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    let mut command = std::process::Command::new(program);
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    command
 }

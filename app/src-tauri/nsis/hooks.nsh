@@ -6,7 +6,9 @@
     ; Fast catch-up's scheduled task (TRD §9.3) was set up with administrator permission: taking it away asks for it
     ; again, once, and only when it's there.
     ${If} ${FileExists} "$INSTDIR\trovara-helper.exe"
-      ExecWait '"$INSTDIR\trovara-helper.exe" usn uninstall --if-installed'
+      ; nsExec: run without a console window (the helper is a console program).
+      nsExec::Exec '"$INSTDIR\trovara-helper.exe" usn uninstall --if-installed'
+      Pop $0
     ${EndIf}
   ${EndIf}
 !macroend
