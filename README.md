@@ -16,10 +16,9 @@
   <img src="https://img.shields.io/badge/runs-100%25%20on%20your%20PC-success" alt="Runs on your PC">
 </p>
 
-<p align="center">
-  <a href="assets/trovara-demo-1080p.mp4"><img src="assets/demo-video-poster.jpg" alt="Watch the 75-second Trovara demo video" width="640"></a><br>
-  <sub><a href="assets/trovara-demo-1080p.mp4">Watch the 75-second demo</a> (1080p, with narration). Demo files are fictional.</sub>
-</p>
+https://github.com/user-attachments/assets/3298b45d-b659-4d0d-823d-150eeb81141c
+
+<p align="center"><sub>The 75-second demo (1080p, with narration). Demo files are fictional.</sub></p>
 
 Press **Ctrl+Shift+Space** from any app and describe what you remember. Trovara finds pictures, screenshots, PDFs,
 documents, recordings, videos, and code in the folders you select. Results identify the matching page, moment, or
