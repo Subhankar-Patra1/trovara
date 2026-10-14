@@ -2,131 +2,142 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Trovara Settings</title>
-  <link rel="stylesheet" href="setup.css">
+  <link rel="stylesheet" href="settings.css">
 </head>
 <body class="settings">
-  <main>
-    <h2>Shortcut</h2>
-    <div class="card">
+  <aside class="sidebar">
+    <div class="brand"><img src="icon.png" width="32" height="32" alt=""><div class="brand-copy"><strong>Trovara</strong><span>Settings</span></div></div>
+    <nav class="navigation" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
+<button class="nav-item active" id="tab-general" role="tab" aria-selected="true" aria-controls="general" tabindex="0" data-section="general"><span>General</span></button>
+<button class="nav-item" id="tab-folders" role="tab" aria-selected="false" aria-controls="folders" tabindex="-1" data-section="folders"><span>Folders</span><span class="nav-count" id="folder-count" aria-hidden="true">0</span></button>
+<button class="nav-item" id="tab-indexing" role="tab" aria-selected="false" aria-controls="indexing" tabindex="-1" data-section="indexing"><span>Indexing</span></button>
+<button class="nav-item" id="tab-code" role="tab" aria-selected="false" aria-controls="code" tabindex="-1" data-section="code"><span>Code</span></button>
+<button class="nav-item" id="tab-model-page" role="tab" aria-selected="false" aria-controls="model-page" tabindex="-1" data-section="model-page"><span>Model</span></button>
+<button class="nav-item" id="tab-about" role="tab" aria-selected="false" aria-controls="about" tabindex="-1" data-section="about"><span>About</span></button>
+    </nav>
+  </aside>
+  <div class="workspace">
+    <header class="page-header"><div><h1 id="page-title">General</h1><p id="page-description">Set your shortcut and startup preferences.</p></div></header>
+    <main id="settings-content" tabindex="0" aria-label="Settings controls">
+<section class="settings-page" id="general" role="tabpanel" aria-labelledby="tab-general" data-title="General" data-description="Set your shortcut and startup preferences.">
+<div class="section-heading"><h2>Search shortcut</h2></div><div class="card shortcut-card">
       <div class="line-item">
-        <div class="label"><b>Open the search panel</b><span id="key-note">Works in any app.</span></div>
-        <div class="keys" id="keys"></div>
+        <div class="label"><b>Open the search panel</b><span id="key-note" aria-live="polite">Works in any app.</span></div>
+        <div class="keys" id="keys" aria-label="Current shortcut"></div>
         <button id="change-key">Change…</button>
         <button class="link" id="reset-key">Reset</button>
       </div>
-    </div>
-
-    <h2>Folders</h2>
-    <div class="card" id="folder-list"></div>
-    <div class="row-buttons"><button id="add-folder">Add Folder…</button></div>
-
-    <h2>Left out</h2>
-    <div class="card">
-      <div id="skipped-list"></div>
+    </div><div class="section-heading"><h2>Startup and updates</h2></div><div class="card">
       <div class="line-item">
-        <div class="label"><b>File types</b><span>Extensions to leave out, separated by commas: heic, txt, mov</span></div>
-        <input type="text" id="skip-types" spellcheck="false" placeholder="none">
+        <div class="label"><b>Start Trovara when you sign in</b><span>So the shortcut always works.</span></div>
+        <input type="checkbox" id="launch-at-login" aria-label="Start Trovara at sign-in" class="switch" role="switch">
+      </div>
+
+      <div class="line-item">
+        <div class="label"><b>Check for updates</b><span id="update-note" aria-live="polite">Once a day. Nothing about your files is sent.</span></div>
+        <button id="check-now">Check Now</button>
+        <input type="checkbox" id="check-updates" aria-label="Check for updates automatically" class="switch" role="switch">
       </div>
     </div>
-    <div class="row-buttons"><button id="add-skipped">Leave Out a Folder…</button></div>
-
-    <h2>Code</h2>
-    <div class="card">
+</section>
+<section class="settings-page" id="folders" role="tabpanel" aria-labelledby="tab-folders" data-title="Folders" data-description="Choose what Trovara reads and what it skips." hidden>
+<div class="section-heading"><h2>Search folders</h2><p>Trovara reads files only in these folders.</p></div><div class="card" id="folder-list"></div>
+    <div class="row-buttons"><button class="primary" id="add-folder">Add folder…</button></div><div class="section-heading"><h2>Excluded folders and file types</h2><p>Choose what Trovara skips in your search folders.</p></div><div class="card">
+      <div id="skipped-list"></div>
       <div class="line-item">
-        <div class="label"><b>Search code</b><span>Type <b>code:</b> in the search panel, then what the code does
-          or a name in it. Code never shows up in other searches. Off: no code is read.</span></div>
-        <input type="checkbox" id="code-on">
+        <div class="label"><b>File extensions</b><span>Separate extensions with commas. For example: heic, txt, mov.</span></div>
+        <input type="text" id="skip-types" aria-label="Excluded file extensions" spellcheck="false" placeholder="No file types excluded">
+      </div>
+    </div>
+    <div class="row-buttons"><button id="add-skipped">Exclude folder…</button></div><p class="footnote">Trovara skips credential files and cloud-only files automatically.</p>
+</section>
+<section class="settings-page" id="indexing" role="tabpanel" aria-labelledby="tab-indexing" data-title="Indexing" data-description="Control when Trovara reads new and changed files." hidden>
+<div class="section-heading"><h2>Activity and schedule</h2></div><div class="card">
+      <div class="line-item">
+        <div class="label"><b>Pause indexing</b><span>New files wait until you resume. Search still works.</span></div>
+        <input type="checkbox" id="paused" aria-label="Pause indexing" class="switch" role="switch">
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Index on battery</b><span>When off, queued files wait for mains power. New files still get indexed. Battery Saver pauses queued files.</span></div>
+        <input type="checkbox" id="on-battery" aria-label="Index on battery" class="switch" role="switch">
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Pause during fullscreen apps</b><span>Queued files wait while a fullscreen app is active.</span></div>
+        <input type="checkbox" id="pause-fullscreen" aria-label="Pause during fullscreen apps" class="switch" role="switch">
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Also read data and config files</b><span>JSON, YAML, XML, logs and INI files, read as text. Off by default: they can crowd your results.</span></div>
+        <input type="checkbox" id="include-data" aria-label="Also read data and config files" class="switch" role="switch">
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Index only at set hours</b><span>Read queued files within a daily time range. New files get indexed at any time.</span></div>
+        <span class="hours" id="hours" hidden><input type="time" id="hours-from" aria-label="Start time"> to <input type="time" id="hours-to" aria-label="End time"></span>
+        <input type="checkbox" id="hours-on" aria-label="Index only at set hours" class="switch" role="switch">
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Indexing speed</b><span id="priority-note"></span></div>
+        <select id="priority" aria-label="Indexing speed">
+          <option value="auto">Automatic</option>
+          <option value="normal">Full speed</option>
+          <option value="low">Reduced priority</option>
+          <option value="eco">Efficiency mode</option>
+        </select>
+      </div>
+    </div><div class="section-heading"><h2>After a restart</h2><p>Find changes made while Trovara was closed.</p></div><div class="card"><div class="line-item">
+        <div class="label"><b>Fast catch-up after a restart</b><span id="catchup-note" aria-live="polite">Checking…</span></div>
+        <button id="catchup" disabled>…</button>
+      </div></div>
+</section>
+<section class="settings-page" id="code" role="tabpanel" aria-labelledby="tab-code" data-title="Code" data-description="Search source code in the folders you choose." hidden>
+<div class="section-heading"><h2>Code search</h2><p>Search code in a separate index.</p></div><div class="card">
+      <div class="line-item">
+        <div class="label"><b>Search code</b><span>Type <b>code:</b> followed by a description or a name. Code uses a separate search index.</span></div>
+        <input type="checkbox" id="code-on" aria-label="Search code" class="switch" role="switch">
       </div>
       <div id="code-parts">
         <div id="code-folder-list"></div>
         <div class="line-item">
           <div class="label"><b>Open code in</b><span id="editor-note">Trovara opens code at the line that matched.</span></div>
-          <select id="editor"></select>
+          <select id="editor" aria-label="Open code in"></select>
         </div>
         <div class="line-item">
           <div class="label"><b>Turn off code search</b><span>Stops reading code and deletes the code index.</span></div>
-          <button id="code-off">Turn Off Code Search…</button>
+          <button class="danger" id="code-off">Turn off…</button>
         </div>
       </div>
     </div>
     <div class="row-buttons" id="code-buttons">
-      <button id="add-code-folder">Add Code Folder…</button>
-      <button id="add-code-skipped">Leave Out a Folder…</button>
+      <button id="add-code-folder">Add code folder…</button>
+      <button id="add-code-skipped">Exclude folder…</button>
     </div>
-    <div class="card" id="code-skipped-card"><div id="code-skipped-list"></div></div>
-
-    <h2>Indexing</h2>
-    <div class="card">
-      <div class="line-item">
-        <div class="label"><b>Pause indexing</b><span>New files wait until you resume. Search still works.</span></div>
-        <input type="checkbox" id="paused">
-      </div>
-      <div class="line-item">
-        <div class="label"><b>Index on battery</b><span>Off: the backlog waits for mains power (new files are always
-          indexed). Battery Saver always pauses the backlog.</span></div>
-        <input type="checkbox" id="on-battery">
-      </div>
-      <div class="line-item">
-        <div class="label"><b>Wait during games, videos and presentations</b><span>The backlog pauses while a
-          fullscreen app has the screen.</span></div>
-        <input type="checkbox" id="pause-fullscreen">
-      </div>
-      <div class="line-item">
-        <div class="label"><b>Index only at set hours</b><span>For the backlog; new files are indexed at any time.</span></div>
-        <span class="hours" id="hours" hidden><input type="time" id="hours-from"> to <input type="time" id="hours-to"></span>
-        <input type="checkbox" id="hours-on">
-      </div>
-      <div class="line-item">
-        <div class="label"><b>Speed</b><span id="priority-note"></span></div>
-        <select id="priority">
-          <option value="auto">Automatic</option>
-          <option value="normal">Fastest</option>
-          <option value="low">Gentle</option>
-          <option value="eco">Most efficient</option>
-        </select>
-      </div>
-    </div>
-
-    <h2>Starting up</h2>
-    <div class="card">
-      <div class="line-item">
-        <div class="label"><b>Start Trovara when you sign in</b><span>So the shortcut always works.</span></div>
-        <input type="checkbox" id="launch-at-login">
-      </div>
-      <div class="line-item">
-        <div class="label"><b>Fast catch-up after a restart</b><span id="catchup-note">Checking…</span></div>
-        <button id="catchup" disabled>…</button>
-      </div>
-      <div class="line-item">
-        <div class="label"><b>Check for updates</b><span id="update-note">Once a day. Nothing about your files is sent.</span></div>
-        <button id="check-now">Check Now</button>
-        <input type="checkbox" id="check-updates">
-      </div>
-    </div>
-
-    <h2>Model</h2>
-    <div class="card">
-      <div class="line-item">
-        <div class="label"><b>EmbeddingGemma 2</b><span id="model">Checking…</span></div>
+    <div class="card" id="code-skipped-card"><div id="code-skipped-list"></div></div><p class="info-note" id="code-disabled-note">Code search is off. Turn it on to select folders and an editor.</p>
+</section>
+<section class="settings-page" id="model-page" role="tabpanel" aria-labelledby="tab-model-page" data-title="Model" data-description="Manage the model that runs on your PC." hidden>
+<div class="model-banner"><div class="model-mark" aria-hidden="true"><svg viewBox="0 0 40 40"><defs><linearGradient id="gem" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#14b8a6"/><stop offset="1" stop-color="#6366f1"/></linearGradient></defs><rect width="40" height="40" rx="10" fill="url(#gem)"/><path d="M13 15 L17 11 H23 L27 15 L20 29 Z M13 15 H27 M17 11 L20 15 L23 11 M20 15 V29" fill="none" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M30 8 l0.9 2.1 2.1 0.9 -2.1 0.9 -0.9 2.1 -0.9 -2.1 -2.1 -0.9 2.1 -0.9 Z" fill="#fff"/></svg></div><div><h2>EmbeddingGemma 2</h2><p>Google DeepMind · Local inference</p></div><span class="status-badge" id="model-badge">Checking</span></div><div class="card">
+      <div class="line-item model-status">
+        <div class="status-icon" id="model-icon" data-state="checking" aria-hidden="true"></div>
+        <div class="label"><b id="model-title">Model status</b><span id="model" aria-live="polite">Checking…</span></div>
         <button id="model-retry" hidden>Try Again</button>
         <button id="model-files" hidden>Use Files…</button>
       </div>
-    </div>
-
-    <h2>About</h2>
-    <div class="card">
+    </div><progress id="model-progress" max="100" value="0" aria-label="Model download progress" hidden></progress><div class="model-details"><div><span>Download size</span><strong>865 MB</strong></div><div><span>Inputs</span><strong>Text, images, audio</strong></div><div><span>Videos</span><strong>Read as pictures (one per shot) and sound</strong></div></div><p class="info-note">The model runs on your PC after the download completes.</p>
+</section>
+<section class="settings-page" id="about" role="tabpanel" aria-labelledby="tab-about" data-title="About" data-description="Application details and local data." hidden>
+<div class="about-identity"><img src="logo.png" width="176" height="176" alt="Trovara app logo"><div><strong>Trovara</strong><p>Find local files by describing their contents.</p></div></div>
+<div class="section-heading"><h2>Application details</h2><p>Version, search index, and local logs.</p></div><div class="card">
       <div class="line-item">
         <div class="label"><b id="version">Trovara</b><span id="index-place"></span></div>
         <button id="licenses">Licenses</button>
         <button id="open-logs">Open Logs</button>
       </div>
     </div>
-  </main>
-  <footer>
-    <span class="model" id="saved"></span>
-    <span class="buttons"><button class="primary" id="done">Done</button></span>
-  </footer>
+</section>
+    </main>
+    <footer class="page-footer"><div class="save-status"><span id="saved" role="status" aria-live="polite">Changes save automatically</span></div><button class="primary" id="done">Done</button></footer>
+  </div>
   <script src="hotkey.js"></script>
   <script src="settings.js"></script>
 </body>

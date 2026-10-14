@@ -11,6 +11,7 @@ const $ = (id) => document.getElementById(id);
 const folders = new Map();   // path → {checked, row, counts}
 let page = 0;
 let pages = PAGES;
+let renderedPage = null;
 let info = { offered: [], chosen: [], hotkey: "", model: { state: "checking" }, auto: false, setUp: false };
 
 async function start() {
@@ -40,11 +41,18 @@ async function start() {
 // MARK: Pages
 
 function render() {
+  document.body.classList.toggle("folder-mode", pages[page] === "folders");
+  if (renderedPage !== pages[page]) {
+    document.querySelector("main").scrollTop = 0;
+    renderedPage = pages[page];
+  }
   PAGES.forEach((name) => { $(name).hidden = name !== pages[page]; });
   $("back").hidden = page === 0;
   const last = page === pages.length - 1;
   $("next").textContent = last ? (pages.length === 1 ? "Save" : "Start") : "Continue";
-  $("next").disabled = pages[page] === "folders" && !chosenFolders().length;
+  const count = chosenFolders().length;
+  $("next").disabled = pages[page] === "folders" && !count;
+  $("folder-selection").textContent = count ? `${count} ${count === 1 ? "folder" : "folders"} selected` : "Select at least one folder";
 }
 
 $("next").addEventListener("click", async () => {
@@ -82,9 +90,17 @@ async function clickThrough() {
 function addFolder(path, checked) {
   const row = document.createElement("label");
   row.className = "folder";
+  const icon = document.createElement("span");
+  icon.className = "folder-icon";
+  icon.setAttribute("aria-hidden", "true");
+  const drive = /^[a-z]:[\\/]?$/i.test(path);
+  icon.innerHTML = drive
+    ? '<svg viewBox="0 0 24 24"><path d="M5 4 H19 L21 15 V20 H3 V15 Z M3 15 H21 M16 17.5 H18"/><circle cx="6" cy="17.5" r=".5"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M3 7 V19 H21 V7 H11 L9 4 H3 Z"/></svg>';
   const box = document.createElement("input");
   box.type = "checkbox";
   box.checked = checked;
+  box.setAttribute("aria-label", `Search ${path.replaceAll("/", "\\")}`);
   box.addEventListener("change", () => {
     folders.get(path).checked = box.checked;
     render();
@@ -97,11 +113,12 @@ function addFolder(path, checked) {
   const where = document.createElement("div");
   where.className = "path";
   where.textContent = path.replaceAll("/", "\\");
-  text.append(name, where);
+  where.title = where.textContent;
   const counts = document.createElement("div");
   counts.className = "counts";
   counts.textContent = "Counting…";
-  row.append(box, text, counts);
+  text.append(name, where, counts);
+  row.append(icon, text, box);
   $("folder-list").append(row);
   folders.set(path, { checked, row, counts });
 }
@@ -110,18 +127,32 @@ function chosenFolders() {
   return [...folders].filter(([, folder]) => folder.checked).map(([path]) => path);
 }
 
+/// What each folder holds: the counts Trovara has (at once), and a count only for folders it hasn't counted, or whose
+/// files changed since; those keep showing the last counts while they're counted again.
 async function estimate(paths) {
   if (!paths.length) return;
+  let known = [];
+  try {
+    known = await invoke("estimate", { folders: paths, cached: true });
+  } catch (error) {}
+  const wanted = [];
+  for (const path of paths) {
+    const answer = known.find((item) => same(item.folder, path));
+    if (answer) folders.get(path).counts.textContent = countsText(answer);
+    if (!answer || answer.stale) wanted.push(path);
+  }
+  if (!wanted.length) return;
   let answers = [];
   try {
-    answers = await invoke("estimate", { folders: paths });
+    answers = await invoke("estimate", { folders: wanted });
   } catch (error) {
-    for (const path of paths) folders.get(path).counts.textContent = "";
+    for (const path of wanted) if (!known.some((item) => same(item.folder, path))) folders.get(path).counts.textContent = "";
     return;
   }
-  for (const path of paths) {
+  for (const path of wanted) {
     const answer = answers.find((item) => same(item.folder, path));
-    folders.get(path).counts.textContent = answer ? countsText(answer) : "";
+    if (answer) folders.get(path).counts.textContent = countsText(answer);
+    else if (!known.some((item) => same(item.folder, path))) folders.get(path).counts.textContent = "";
   }
 }
 

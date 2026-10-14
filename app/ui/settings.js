@@ -6,11 +6,67 @@ const tauri = window.__TAURI__;
 const invoke = (command, args) => tauri.core.invoke(command, args);
 const $ = (id) => document.getElementById(id);
 
+// Keep one section visible and retain its scroll position while navigating.
+const tabs = [...document.querySelectorAll(".nav-item")];
+const sectionScroll = new Map();
+let activeSection = "general";
+function selectSection(tab) {
+  if (activeSection === "general" && tab.dataset.section !== "general" && $("keys").classList.contains("recording")) {
+    $("change-key").click();
+  }
+  const content = $("settings-content");
+  sectionScroll.set(activeSection, content.scrollTop);
+  activeSection = tab.dataset.section;
+  for (const item of tabs) {
+    const selected = item === tab;
+    item.classList.toggle("active", selected);
+    item.setAttribute("aria-selected", String(selected));
+    item.tabIndex = selected ? 0 : -1;
+    $(item.dataset.section).hidden = !selected;
+  }
+  const page = $(activeSection);
+  $("page-title").textContent = page.dataset.title;
+  $("page-description").textContent = page.dataset.description;
+  content.scrollTop = sectionScroll.get(activeSection) || 0;
+  tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+for (const tab of tabs) {
+  tab.addEventListener("click", () => selectSection(tab));
+  tab.addEventListener("keydown", (event) => {
+    const horizontal = window.matchMedia("(max-width: 620px)").matches;
+    const nextKey = horizontal ? "ArrowRight" : "ArrowDown";
+    const previousKey = horizontal ? "ArrowLeft" : "ArrowUp";
+    let index = tabs.indexOf(tab);
+    if (event.key === nextKey) index = (index + 1) % tabs.length;
+    else if (event.key === previousKey) index = (index + tabs.length - 1) % tabs.length;
+    else if (event.key === "Home") index = 0;
+    else if (event.key === "End") index = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    selectSection(tabs[index]);
+    tabs[index].focus();
+  });
+}
+const narrowLayout = window.matchMedia("(max-width: 620px)");
+function updateNavigationOrientation() {
+  document.querySelector(".navigation").setAttribute("aria-orientation", narrowLayout.matches ? "horizontal" : "vertical");
+}
+narrowLayout.addEventListener("change", updateNavigationOrientation);
+updateNavigationOrientation();
+// Clicking a switch's description also changes the native checkbox.
+for (const control of document.querySelectorAll(".switch")) {
+  control.closest(".line-item").querySelector(".label")?.addEventListener("click", (event) => {
+    if (event.target.closest("button, a, input, select")) return;
+    control.focus();
+    control.click();
+  });
+}
+
 const PRIORITY_NOTES = {
-  auto: "Full speed on mains power, most efficient on battery. Recommended.",
-  normal: "Full speed always. Indexing is GPU work, so your apps stay quick.",
-  low: "Gives way to other programs. Indexing takes several times longer.",
-  eco: "Windows' efficiency mode: the least power, the slowest indexing.",
+  auto: "Full speed on mains power. Efficiency mode on battery.",
+  normal: "Use full speed on mains power and battery.",
+  low: "Use a lower priority. Indexing takes longer.",
+  eco: "Use Windows efficiency mode to reduce power use. Indexing takes longer.",
 };
 
 let settings = null;
@@ -32,12 +88,13 @@ async function start() {
 }
 
 function render() {
+  $("folder-count").textContent = settings.folders.length;
   renderCode();
-  renderPaths($("folder-list"), settings.folders, "No folders: Trovara searches nothing yet.", (path) => {
+  renderPaths($("folder-list"), settings.folders, "Add a folder to start searching your files.", (path) => {
     settings.folders = settings.folders.filter((folder) => folder !== path);
     save();
   });
-  renderPaths($("skipped-list"), settings.skipped, "No folders left out.", (path) => {
+  renderPaths($("skipped-list"), settings.skipped, "No folders excluded.", (path) => {
     settings.skipped = settings.skipped.filter((folder) => folder !== path);
     save();
   });
@@ -45,6 +102,7 @@ function render() {
   $("paused").checked = settings.paused;
   $("on-battery").checked = settings.indexOnBattery;
   $("pause-fullscreen").checked = settings.pauseFullscreen;
+  $("include-data").checked = Boolean(settings.includeData);
   const [from, to] = (settings.hours || "").split("-");
   $("hours-on").checked = Boolean(settings.hours);
   $("hours").hidden = !settings.hours;
@@ -70,6 +128,15 @@ function renderPaths(container, paths, emptyText, remove) {
   container.replaceChildren(...paths.map((path) => {
     const line = document.createElement("div");
     line.className = "line-item";
+    const icon = document.createElement("span");
+    icon.className = "folder-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9H3Z"/></svg>';
+    const detail = document.createElement("div");
+    detail.className = "folder-detail";
+    const title = document.createElement("span");
+    title.className = "folder-name";
+    title.textContent = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
     const name = document.createElement("span");
     name.className = "path";
     name.textContent = path.replaceAll("/", "\\");
@@ -77,22 +144,35 @@ function renderPaths(container, paths, emptyText, remove) {
     const button = document.createElement("button");
     button.className = "remove";
     button.textContent = "Remove";
+    button.setAttribute("aria-label", `Remove folder ${path}`);
     button.onclick = () => remove(path);
-    line.append(name, button);
+    detail.append(title, name);
+    line.append(icon, detail, button);
     return line;
   }));
 }
 
 let saving = Promise.resolve();
+let saveMessageTimer;
+let saveRevision = 0;
+function showSaveState(state, message) {
+  clearTimeout(saveMessageTimer);
+  $("saved").textContent = message;
+  $("saved").closest(".save-status").dataset.state = state;
+}
 function save() {
+  const revision = ++saveRevision;
   render();
+  showSaveState("saving", "Saving…");
   saving = saving.then(async () => {
     try {
       await invoke("save_settings", { settings });
-      $("saved").textContent = "Saved";
-      setTimeout(() => { $("saved").textContent = ""; }, 1500);
+      if (revision === saveRevision) {
+        showSaveState("saved", "Changes saved");
+        saveMessageTimer = setTimeout(() => showSaveState("saved", "Changes save automatically"), 2500);
+      }
     } catch (error) {
-      $("saved").textContent = String(error);
+      showSaveState("error", String(error));
     }
   });
 }
@@ -117,6 +197,7 @@ $("skip-types").addEventListener("change", () => {
 });
 
 const toggles = { paused: "paused", "on-battery": "indexOnBattery", "pause-fullscreen": "pauseFullscreen",
+                  "include-data": "includeData",
                   "launch-at-login": "launchAtLogin", "check-updates": "checkUpdates" };
 for (const [id, key] of Object.entries(toggles)) {
   $(id).addEventListener("change", () => {
@@ -168,15 +249,62 @@ async function checkCatchUp() {
 
 // MARK: The model
 
+// The model's state as an icon and two lines: a check when it's ready, a spinner while it's checked, a ring that
+// fills as it downloads, a warning when the download failed.
+const MODEL_ICONS = {
+  ready: '<svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="14"/><path d="M10 16.5 L14.2 20.5 L22 12"/></svg>',
+  checking: '<svg viewBox="0 0 32 32" class="spin"><circle cx="16" cy="16" r="12" class="track"/><path d="M16 4 A12 12 0 0 1 28 16"/></svg>',
+  failed: '<svg viewBox="0 0 32 32"><path d="M16 4 L29 27 H3 Z"/><path d="M16 12 V19 M16 23 V23.2"/></svg>',
+};
+
+function downloadRing(percent) {
+  const circumference = 2 * Math.PI * 12;
+  const filled = circumference * Math.min(100, Math.max(0, percent)) / 100;
+  return `<svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="12" class="track"/>`
+    + `<circle cx="16" cy="16" r="12" class="fill" stroke-dasharray="${filled} ${circumference}" transform="rotate(-90 16 16)"/>`
+    + `<text x="16" y="19.5" text-anchor="middle">${Math.floor(percent)}</text></svg>`;
+}
+
 function showModel(model) {
-  const lines = { checking: "Checking…", ready: "Ready. Everything runs on this PC.",
-                  failed: `Couldn't download: ${model.message || "unknown error"}` };
-  let text = lines[model.state] || "";
-  if (model.state === "downloading") {
-    text = model.total && model.bytes ? `Downloading · ${Math.floor((100 * model.bytes) / model.total)}%` : "Downloading…";
-    if (model.problem) text += ` (${model.problem}; trying again)`;
+  const megabytes = (bytes) => Math.round((bytes || 0) / 1e6).toLocaleString();
+  const percent = model.total > 0 ? (100 * (model.bytes || 0)) / model.total : 0;
+  let title = "Model status", text = "";
+  switch (model.state) {
+    case "ready":
+      title = "Ready to search";
+      text = "Everything runs on this PC. Nothing you index is uploaded.";
+      break;
+    case "checking":
+      title = "Checking the model";
+      text = "Making sure the model files are complete and unchanged…";
+      break;
+    case "downloading":
+      title = "Downloading the model";
+      text = model.total && model.bytes ? `${megabytes(model.bytes)} of ${megabytes(model.total)} MB · ${Math.floor(percent)}%`
+                                        : "Starting the download…";
+      if (model.problem) text += ` · ${model.problem}; trying again`;
+      break;
+    case "failed": {
+      title = "The download didn't finish";
+      const reason = String(model.message || "unknown error").replace(/\.$/, "");
+      text = `${reason.charAt(0).toUpperCase()}${reason.slice(1)}. Try again, or use files downloaded on another PC.`;
+      break;
+    }
+    default:
+      title = "Model unavailable";
   }
+  $("model-title").textContent = title;
   $("model").textContent = text;
+  const icon = $("model-icon");
+  icon.dataset.state = model.state;
+  icon.innerHTML = model.state === "downloading" ? downloadRing(percent) : (MODEL_ICONS[model.state] || MODEL_ICONS.checking);
+  const stateLabels = { checking: "Checking", ready: "Ready", failed: "Download failed", downloading: "Downloading" };
+  $("model-badge").textContent = stateLabels[model.state] || "Unavailable";
+  $("model-badge").dataset.state = model.state;
+  const progress = $("model-progress");
+  progress.hidden = model.state !== "downloading";
+  if (model.total > 0) progress.value = Math.min(100, Math.max(0, percent));
+  else progress.removeAttribute("value");
   $("model-retry").hidden = model.state !== "failed";
   $("model-files").hidden = model.state !== "failed" && model.state !== "downloading";
 }
@@ -184,7 +312,7 @@ function showModel(model) {
 $("model-retry").addEventListener("click", () => invoke("retry_model").catch(() => {}));
 $("model-files").addEventListener("click", () => invoke("use_model_files").catch(() => {}));
 $("open-logs").addEventListener("click", () => invoke("open_logs").catch(() => {}));
-$("licenses").addEventListener("click", () => invoke("open_acknowledgements").catch((error) => { $("saved").textContent = String(error); }));
+$("licenses").addEventListener("click", () => invoke("open_acknowledgements").catch((error) => showSaveState("error", String(error))));
 
 // MARK: Updates
 
@@ -231,6 +359,7 @@ const codeEstimates = new Map();   // folder → its line ("312 files · about 2
 function renderCode() {
   const code = settings.code;
   $("code-on").checked = code.on;
+  $("code-disabled-note").hidden = code.on;
   $("code-parts").hidden = !code.on;
   $("code-buttons").hidden = !code.on;
   $("code-skipped-card").hidden = !code.on || !code.skipped.length;
@@ -243,10 +372,9 @@ function renderCode() {
   for (const [index, path] of code.folders.entries()) {
     const line = $("code-folder-list").children[index];
     const note = document.createElement("span");
-    note.className = "label";
-    note.style.flex = "none";
-    note.innerHTML = `<span>${codeEstimates.get(path) ?? "Counting…"}</span>`;
-    line?.insertBefore(note, line.lastChild);
+    note.className = "path-meta";
+    note.textContent = codeEstimates.get(path) ?? "Counting…";
+    line?.querySelector(".folder-detail")?.append(note);
   }
   renderPaths($("code-skipped-list"), code.skipped, "", (path) => {
     code.skipped = code.skipped.filter((folder) => folder !== path);
@@ -344,11 +472,11 @@ $("code-off").addEventListener("click", async () => {
       render();
     }
   } catch (error) {
-    $("saved").textContent = String(error);
+    showSaveState("error", String(error));
   }
 });
 
 start().then(() => {
   loadEditors();
   if (settings.code.on) estimateCode(settings.code.folders);
-});
+}).catch((error) => showSaveState("error", `Could not load settings: ${error}`));

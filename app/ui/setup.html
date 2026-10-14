@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Set Up Trovara</title>
   <link rel="stylesheet" href="setup.css">
 </head>
@@ -26,11 +28,10 @@
     </section>
 
     <section class="page" id="folders" hidden>
-      <h2>What should Trovara search?</h2>
-      <p class="subtitle">Pick folders. You can change this anytime from the tray: Choose Folders…</p>
+      <header class="folder-heading"><img src="icon.png" width="48" height="48" alt=""><div><h2>Choose folders</h2><p class="subtitle">Select folders to search. Change them later in Settings → Folders.</p></div></header>
+      <div class="folder-toolbar"><span id="folder-selection" role="status" aria-live="polite">No folders selected</span><button id="add-folder"><span aria-hidden="true">+</span> Add Folder…</button></div>
       <div class="folders" id="folder-list"></div>
-      <button class="link" id="add-folder">Add Folder…</button>
-      <p class="note">Trovara only reads files: it never changes, moves or uploads them.</p>
+      <p class="note folder-note">Trovara reads your files on this PC. Your files stay in their original locations.</p>
     </section>
 
     <section class="page" id="shortcut" hidden>
@@ -79,7 +80,7 @@
   </main>
 
   <footer>
-    <span class="model"><span id="model"></span>
+    <span class="model"><span id="model" role="status" aria-live="polite"></span>
       <button class="link small" id="model-retry" hidden>Try Again</button>
       <button class="link small" id="model-files" hidden>Use Files…</button></span>
     <span class="buttons">
