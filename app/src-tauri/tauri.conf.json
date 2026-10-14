@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Trovara",
+  "version": "1.0.0-beta.1",
+  "identifier": "app.trovara.desktop",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:; media-src 'self' asset: http://asset.localhost; style-src 'self' 'unsafe-inline'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "Subhankar Patra",
+    "copyright": "© 2026 Subhankar Patra. MIT License.",
+    "homepage": "https://github.com/Subhankar-Patra1/trovara",
+    "category": "Utility",
+    "shortDescription": "Search your files by what's in them",
+    "longDescription": "Trovara finds photos, screenshots, PDFs, documents, recordings, videos and code by what's in them, on this PC, with nothing uploaded.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../../target/package/*": "./"
+    },
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "template": "nsis/installer.nsi",
+        "installerHooks": "nsis/hooks.nsh",
+        "installerIcon": "icons/icon.ico",
+        "displayLanguageSelector": false
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYxNDZGMzVCNjQ5QTcwQjAKUldTd2NKcGtXL05HWVZDT2VMUmsvN3ZmSUtxdmdtSzIrSG1DUnAzOHRraHFLb3BZb1RPT1FCL00K",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

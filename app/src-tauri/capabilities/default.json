@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Trovara's pages: Tauri's core (events, the asset URLs, paths). Their commands are the app's own.",
+  "windows": ["panel", "search", "setup", "settings"],
+  "permissions": ["core:default"]
+}
