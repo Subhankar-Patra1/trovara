@@ -504,6 +504,24 @@ impl IndexStore {
         Ok(())
     }
 
+    /// Replaces what indexing learned about a file, leaving its state and note as they are (a later step that adds to a
+    /// file already done: a video's subtitles).
+    pub fn set_info(&self, id: i64, info: &Info) -> Result<()> {
+        let json = (!info.is_empty()).then(|| serde_json::to_string(info).unwrap_or_default());
+        self.db.execute("UPDATE files SET info = ? WHERE id = ?", params![json, id])?;
+        Ok(())
+    }
+
+    /// Videos read before subtitles were (no "subtitles" in their info): (id, path), up to `limit`.
+    pub fn videos_without_subtitles(&self, limit: usize) -> Result<Vec<(i64, String)>> {
+        let mut statement = self.db.prepare(
+            "SELECT id, path FROM files WHERE kind = 'video' AND state = 'done'
+             AND json_extract(info, '$.subtitles') IS NULL ORDER BY id LIMIT ?",
+        )?;
+        let rows = statement.query_map([limit as i64], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        rows.collect()
+    }
+
     /// A file the indexing helper had to stop on (reading it ran away): it isn't read again until it changes. A long
     /// file that was being finished keeps what was read of it. False when no file has that path.
     pub fn mark_stopped(&self, path: &str, why: &str) -> Result<bool> {
@@ -678,14 +696,25 @@ pub fn path_key(path: &str) -> String {
     }
 }
 
+/// What every key inside the folder whose key is `folder_key` starts with: "c:\photos" → "c:\photos\". A drive's
+/// root keeps its backslash in `path_key` ("e:\"), so it is its own prefix: adding another would match nothing,
+/// which once hid every file of a chosen drive (E:\) from the panel.
+pub fn inside_prefix(folder_key: &str) -> String {
+    if folder_key.ends_with('\\') {
+        folder_key.to_string()
+    } else {
+        format!("{folder_key}\\")
+    }
+}
+
+/// Whether the key `key` is the folder `folder_key` or inside it (both `path_key`s).
+pub fn within(key: &str, folder_key: &str) -> bool {
+    key == folder_key || key.starts_with(&inside_prefix(folder_key))
+}
+
 /// The ranges of the `path_key` index that hold the files under `folder`.
 pub fn path_ranges(folder: &str) -> Vec<(String, String)> {
-    let key = path_key(folder);
-    let prefix = if key.ends_with('\\') {
-        key
-    } else {
-        format!("{key}\\")
-    };
+    let prefix = inside_prefix(&path_key(folder));
     let to = format!("{prefix}\u{10FFFF}");
     vec![(prefix, to)]
 }
@@ -693,7 +722,7 @@ pub fn path_ranges(folder: &str) -> Vec<(String, String)> {
 /// Whether `path` is `folder` or inside it (case-insensitively, either slash).
 pub fn is_inside(path: &str, folder: &str) -> bool {
     let (path, folder) = (path_key(path), path_key(folder));
-    path != folder && path.starts_with(&format!("{}\\", folder.trim_end_matches('\\')))
+    path != folder && path.starts_with(&inside_prefix(&folder))
 }
 
 /// "Screenshot 2026-10-01 093107.png" → searchable words: the file name.
@@ -806,6 +835,16 @@ mod tests {
         assert!(!is_inside(r"C:\Users\Media", r"C:\Users\Me"));
         assert_eq!(path_key(r"C:\"), r"c:\");
         assert_eq!(name_text(r"C:\Users\Me\Pictures\Beach.JPG"), "Beach.JPG");
+        // A whole drive chosen as a folder: everything on it is inside (it once matched nothing).
+        let drive = path_key(r"E:\");
+        assert!(within(&path_key(r"E:\MY ALL Docs\Voter_Card.pdf"), &drive));
+        assert!(within(&drive, &drive));
+        assert!(!within(&path_key(r"C:\x.png"), &drive));
+        assert!(within(&path_key(r"C:\Users\Me\a.png"), &path_key(r"C:\Users\Me")));
+        assert!(!within(&path_key(r"C:\Users\Media\a.png"), &path_key(r"C:\Users\Me")));
+        assert_eq!(inside_prefix(&drive), r"e:\");
+        assert!(is_inside(r"E:\Movies", r"E:\"));
+        assert_eq!(store.files_under(&[r"C:\".into()]).unwrap().len(), 1);
     }
 
     #[test]

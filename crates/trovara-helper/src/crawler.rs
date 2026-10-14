@@ -15,7 +15,7 @@ use trovara_core::rules::{
     system_folders,
     Classification,
 };
-use trovara_core::store::path_key;
+use trovara_core::store::{inside_prefix, path_key, within};
 use trovara_core::{Candidate, FileKind, IndexOptions};
 
 #[derive(Debug, Default)]
@@ -65,7 +65,7 @@ pub fn crawl_folders(
         let key = path_key(folder);
         let Some(root) = roots
             .iter()
-            .filter(|r| key == path_key(r) || key.starts_with(&format!("{}\\", path_key(r))))
+            .filter(|r| within(&key, &path_key(r)))
             .max_by_key(|r| r.len())
         else {
             continue;
@@ -128,7 +128,7 @@ fn crawl_from(
         let skips: Vec<String> = options
             .excluded_folders
             .iter()
-            .filter(|skip| path_key(skip).starts_with(&format!("{root_key}\\")))
+            .filter(|skip| path_key(skip).starts_with(&inside_prefix(&root_key)))
             .cloned()
             .collect();
         let mut stack = vec![start.clone()];
@@ -291,7 +291,7 @@ fn crawl_code(roots: &[String], options: &IndexOptions) -> CrawlReport {
         let skips: Vec<String> = options
             .excluded_folders
             .iter()
-            .filter(|skip| path_key(skip).starts_with(&format!("{root_key}\\")))
+            .filter(|skip| path_key(skip).starts_with(&inside_prefix(&root_key)))
             .cloned()
             .collect();
         let (system, counts) = (system.clone(), skipped_folders.clone());

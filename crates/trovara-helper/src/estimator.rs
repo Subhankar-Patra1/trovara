@@ -253,8 +253,8 @@ pub fn by_subfolder(
     costs: &Costs,
 ) -> BTreeMap<String, Estimate> {
     let prefix = format!("{}\\", folder.trim_end_matches(['\\', '/']));
-    // path_key drops a trailing backslash: add it back, so "rest" starts inside the folder.
-    let key_prefix = format!("{}\\", trovara_core::store::path_key(folder));
+    // path_key drops a trailing backslash (but a drive's root keeps it): this is where "rest" starts.
+    let key_prefix = trovara_core::store::inside_prefix(&trovara_core::store::path_key(folder));
     let mut groups: HashMap<String, Vec<Candidate>> = HashMap::new();
     for file in candidates {
         let key = trovara_core::store::path_key(&file.path);
