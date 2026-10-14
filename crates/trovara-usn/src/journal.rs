@@ -345,6 +345,14 @@ fn path_of(volume: &Volume, reference: u64) -> Option<String> {
     }
 }
 
+/// A command that opens no console window (this program has none, so a console program it starts would get its own).
+fn hidden(program: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    let mut command = std::process::Command::new(program);
+    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    command
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,12 +377,4 @@ mod tests {
         assert_eq!(valid_volume(r"\\server"), None);
         assert_eq!(key(r"\\?\C:\Users\Me\"), r"c:\users\me");
     }
-}
-
-/// A command that opens no console window (this program has none, so a console program it starts would get its own).
-fn hidden(program: &str) -> std::process::Command {
-    use std::os::windows::process::CommandExt;
-    let mut command = std::process::Command::new(program);
-    command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    command
 }
