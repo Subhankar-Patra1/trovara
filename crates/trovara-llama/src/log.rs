@@ -51,7 +51,10 @@ pub(crate) unsafe extern "C" fn callback(
     if level != ffi::GGML_LOG_LEVEL_CONT {
         state.level = level;
     }
-    if state.level < ffi::GGML_LOG_LEVEL_WARN {
+    // Warnings and errors only; TROVARA_LLAMA_LOG=all keeps everything (buffer sizes, devices: a developer's look).
+    static ALL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let all = *ALL.get_or_init(|| std::env::var("TROVARA_LLAMA_LOG").is_ok_and(|v| v == "all"));
+    if state.level < ffi::GGML_LOG_LEVEL_WARN && !all {
         return;
     }
     match state.file.as_mut() {

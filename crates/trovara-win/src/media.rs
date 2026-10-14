@@ -284,18 +284,32 @@ pub struct Frame {
     pub image: RgbImage,
 }
 
-/// Pictures at (about) `times` seconds, scaled so their long side is at most `max_pixel`, in order. Each is the
-/// keyframe at or before its time, or (when that's more than `tolerance` seconds back) the frame decoded forward to
-/// the time. Times that land on a frame already taken are skipped.
-pub fn frames(
+/// Pictures at (about) `times` seconds, scaled so their long side is at most `max_pixel`, in order (a preview's one
+/// frame; reading a whole video uses `frames_each`, which never holds more than one).
+pub fn frames(path: &Path, times: &[f64], max_pixel: usize, tolerance: f64) -> Result<Vec<Frame>, String> {
+    let mut frames = Vec::new();
+    frames_each(path, times, max_pixel, tolerance, |frame| {
+        frames.push(frame);
+        true
+    })?;
+    Ok(frames)
+}
+
+/// Pictures at (about) `times` seconds, scaled so their long side is at most `max_pixel`, handed to `on_frame` one
+/// at a time as they're decoded, in order; `on_frame` returning false stops. Each is the keyframe at or before its
+/// time, or (when that's more than `tolerance` seconds back) the frame decoded forward to the time. Times that land
+/// on a frame already taken are skipped. Memory stays at one frame for any length: collecting a 2-hour film's 1,200
+/// frames first took 1.6 GB.
+pub fn frames_each(
     path: &Path,
     times: &[f64],
     max_pixel: usize,
     tolerance: f64,
-) -> Result<Vec<Frame>, String> {
+    mut on_frame: impl FnMut(Frame) -> bool,
+) -> Result<(), String> {
     let reader = reader(path, true).map_err(|e| unreadable(&e))?;
     if !has_stream(&reader, FIRST_VIDEO) {
-        return Ok(Vec::new());
+        return Ok(());
     }
     unsafe {
         reader
@@ -327,7 +341,6 @@ pub fn frames(
             .map_err(|e| unreadable(&e))?;
         let (out_w, out_h) = frame_size(&current).ok_or("no video size")?;
 
-        let mut frames: Vec<Frame> = Vec::new();
         let mut last_time = f64::NEG_INFINITY;
         for &target in times {
             let position = PROPVARIANT::from((target * UNITS) as i64);
@@ -376,9 +389,11 @@ pub fn frames(
             if image.width.max(image.height) > max_pixel {
                 image = crate::ocr::shrink_image(&image, max_pixel);
             }
-            frames.push(Frame { time, image });
+            if !on_frame(Frame { time, image }) {
+                break;
+            }
         }
-        Ok(frames)
+        Ok(())
     }
 }
 
