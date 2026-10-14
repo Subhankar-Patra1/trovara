@@ -9,6 +9,25 @@ pub struct RgbImage {
 }
 
 impl RgbImage {
+    /// Marks `rects` (pixels: x0, y0, x1, y1) with a yellow highlighter, multiplied in so ink stays dark and paper
+    /// turns yellow, as a PDF viewer marks a search (PRD F-PRE-04/10).
+    pub fn highlight(&mut self, rects: &[(f64, f64, f64, f64)]) {
+        for &(x0, y0, x1, y1) in rects {
+            let clamp = |v: f64, limit: usize| (v.max(0.0).round() as usize).min(limit);
+            let (left, right) = (clamp(x0 - 1.0, self.width), clamp(x1 + 1.0, self.width));
+            let (top, bottom) = (clamp(y0 - 1.0, self.height), clamp(y1 + 1.0, self.height));
+            for y in top..bottom {
+                for x in left..right {
+                    let at = (y * self.width + x) * 3;
+                    for (channel, tint) in [255.0f64, 219.0, 51.0].iter().enumerate() {
+                        let value = self.pixels[at + channel] as f64;
+                        self.pixels[at + channel] = (value * 0.15 + value * tint / 255.0 * 0.85) as u8;
+                    }
+                }
+            }
+        }
+    }
+
     pub fn new(width: usize, height: usize, pixels: Vec<u8>) -> RgbImage {
         assert_eq!(pixels.len(), width * height * 3, "RGB size");
         RgbImage {

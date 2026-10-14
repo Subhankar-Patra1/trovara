@@ -94,7 +94,39 @@ pub fn text(image: &RgbImage, script: Script) -> String {
     recognize(engine, image).unwrap_or_default()
 }
 
-fn recognize(engine: &OcrEngine, image: &RgbImage) -> windows::core::Result<String> {
+/// A word OCR read, and where: pixels of the picture it was given (x, y, width, height).
+#[derive(Clone, Debug)]
+pub struct Word {
+    pub text: String,
+    pub rect: (f32, f32, f32, f32),
+}
+
+/// The words in `image` with their places, for marking found words on a screenshot or a scanned page (PRD
+/// F-PRE-10). Empty when nothing is read or OCR isn't installed.
+pub fn words(image: &RgbImage, script: Script) -> Vec<Word> {
+    let Some(engine) = engine(script) else {
+        return Vec::new();
+    };
+    let (resized, scale);
+    let input = if image.width.max(image.height) > max_dimension() {
+        resized = shrink_image(image, max_dimension());
+        scale = image.width as f32 / resized.width as f32;
+        &resized
+    } else {
+        scale = 1.0;
+        image
+    };
+    recognize_words(engine, input)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|word| {
+            let (x, y, w, h) = word.rect;
+            Word { text: word.text, rect: (x * scale, y * scale, w * scale, h * scale) }
+        })
+        .collect()
+}
+
+fn bitmap(image: &RgbImage) -> windows::core::Result<SoftwareBitmap> {
     // BGRA8, opaque.
     let mut bgra = Vec::with_capacity(image.width * image.height * 4);
     for p in image.pixels.chunks_exact(3) {
@@ -108,6 +140,30 @@ fn recognize(engine: &OcrEngine, image: &RgbImage) -> windows::core::Result<Stri
         BitmapAlphaMode::Premultiplied,
     )?;
     bitmap.CopyFromBuffer(&buffer)?;
+    Ok(bitmap)
+}
+
+/// One recognition at a time per process: two at once on the same engine (the preview renderer's two threads) can
+/// fail, and a failure reads as "no words".
+static RECOGNIZING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn recognize_words(engine: &OcrEngine, image: &RgbImage) -> windows::core::Result<Vec<Word>> {
+    let bitmap = bitmap(image)?;
+    let _turn = RECOGNIZING.lock().unwrap_or_else(|p| p.into_inner());
+    let result = engine.RecognizeAsync(&bitmap)?.join()?;
+    let mut words = Vec::new();
+    for line in result.Lines()? {
+        for word in line.Words()? {
+            let rect = word.BoundingRect()?;
+            words.push(Word { text: word.Text()?.to_string(), rect: (rect.X, rect.Y, rect.Width, rect.Height) });
+        }
+    }
+    Ok(words)
+}
+
+fn recognize(engine: &OcrEngine, image: &RgbImage) -> windows::core::Result<String> {
+    let bitmap = bitmap(image)?;
+    let _turn = RECOGNIZING.lock().unwrap_or_else(|p| p.into_inner());
     let result = engine.RecognizeAsync(&bitmap)?.join()?;
     let mut lines = Vec::new();
     for line in result.Lines()? {
@@ -199,5 +255,19 @@ mod tests {
         let small = shrink_image(&big, 2);
         assert_eq!((small.width, small.height), (2, 1));
         assert!(small.pixels.iter().all(|&p| p == 10));
+    }
+}
+
+#[cfg(test)]
+mod word_tests {
+    /// What OCR reads, word by word, on the picture in TROVARA_OCR_PROBE (a look, not a check).
+    #[test]
+    #[ignore]
+    fn words_on_a_picture() {
+        let path = std::env::var("TROVARA_OCR_PROBE").expect("TROVARA_OCR_PROBE");
+        let decoded = crate::wic::decode(std::path::Path::new(&path), 4000, 1).unwrap();
+        for word in super::words(&decoded.image, super::Script::UserProfile) {
+            println!("{:?} {:?}", word.text, word.rect);
+        }
     }
 }
