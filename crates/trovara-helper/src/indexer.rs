@@ -176,7 +176,7 @@ impl Indexer {
         let vanished: Vec<String> = roots
             .iter()
             .filter(|root| !Path::new(root).is_dir())
-            .map(|root| format!("{}\\", path_key(root)))
+            .map(|root| trovara_core::store::inside_prefix(&path_key(root)))
             .collect();
         self.reconcile(crawl, &existing, &vanished, started)
     }
@@ -367,6 +367,7 @@ impl Indexer {
         should_stop: &mut dyn FnMut() -> bool,
         on_event: &mut dyn FnMut(&Event),
     ) -> Result<BTreeMap<&'static str, usize>, String> {
+        self.add_missing_subtitles(should_stop)?;
         let unfinished = self.store.unfinished().map_err(|e| e.to_string())?;
         let mut jobs: Vec<(FileRecord, Range<usize>)> = Vec::new();
         for file in unfinished {
@@ -454,6 +455,13 @@ impl Indexer {
             }
             saved.save(folder);
         }
+    }
+
+    /// Work for the later pass: long files' rest, and videos read before subtitles were (their subtitles only).
+    pub fn later_work(&self) -> usize {
+        let unfinished = self.store.unfinished().map(|u| u.len()).unwrap_or(0);
+        let subtitles = self.store.videos_without_subtitles(1).map(|v| v.len()).unwrap_or(0);
+        unfinished + subtitles
     }
 
     /// This indexer fills the code index.
@@ -1085,7 +1093,9 @@ impl Indexer {
     fn video(&mut self, file: &FileRecord, path: &Path) -> Result<Outcome, ReadError> {
         let info = trovara_win::media::info(path)
             .map_err(|why| ReadError::File(ExtractError::Unreadable(why)))?;
-        let mut kept: Vec<(f64, f64, trovara_core::image::RgbImage)> = Vec::new();
+        // Each frame is embedded as it's decoded, and only its vector is kept: one picture in memory at a time.
+        // (Collecting all of a 2-hour film's frames before embedding took 1.6 GB.)
+        let mut kept: Vec<(f64, f64, Option<Vec<f32>>)> = Vec::new(); // (start, end, vector)
         if info.video && info.duration > 0.0 {
             let step = self
                 .options
@@ -1096,16 +1106,30 @@ impl Indexer {
                 .map(|i| first + i as f64 * step)
                 .take_while(|&t| t < info.duration)
                 .collect();
-            let frames = trovara_win::media::frames(path, &times, FRAME_PIXELS, step)
-                .map_err(|why| ReadError::File(ExtractError::Unreadable(why)))?;
+            let budget = self.options.frame_budget as usize;
+            let embedder = self.embedder(true)?;
             let mut last_hash: Option<u64> = None;
-            for frame in frames {
+            let mut model_error: Option<String> = None;
+            trovara_win::media::frames_each(path, &times, FRAME_PIXELS, step, |frame| {
                 let hash = trovara_win::media::average_hash(&frame.image);
                 if last_hash.is_some_and(|last| (last ^ hash).count_ones() <= 4) {
-                    continue;
+                    return true;
                 }
                 last_hash = Some(hash);
-                kept.push((frame.time, info.duration, frame.image));
+                match embedder.embed_image_rgb(&frame.image.pixels, frame.image.width, frame.image.height, budget) {
+                    Ok(vector) => kept.push((frame.time, info.duration, Some(vector))),
+                    // The model failing stops the run; a frame it can't read is kept without a vector.
+                    Err(EmbedError::Failed(message)) => {
+                        model_error = Some(message);
+                        return false;
+                    }
+                    Err(_) => kept.push((frame.time, info.duration, None)),
+                }
+                true
+            })
+            .map_err(|why| ReadError::File(ExtractError::Unreadable(why)))?;
+            if let Some(message) = model_error {
+                return Err(ReadError::Model(message));
             }
             // Each kept frame stands for the stretch until the next one.
             for i in 1..kept.len() {
@@ -1117,25 +1141,17 @@ impl Indexer {
         } else {
             Vec::new()
         };
-        if kept.is_empty() && sound.is_empty() {
+        // The subtitles: what's said, line by line, at its moment (PRD F-RD-13).
+        let (subtitles, subtitle_source) = self.subtitle_windows(path)?;
+        if kept.is_empty() && sound.is_empty() && subtitles.is_empty() {
             return Err(ReadError::File(ExtractError::Empty(
                 "no frames or sound".into(),
             )));
         }
-        let budget = self.options.frame_budget as usize;
-        let embedder = self.embedder(true)?;
-        let mut frame_vectors = Vec::with_capacity(kept.len());
-        for (_, _, image) in &kept {
-            frame_vectors.push(
-                embedder
-                    .embed_image_rgb(&image.pixels, image.width, image.height, budget)
-                    .ok(),
-            );
-        }
         let store = &self.store;
         store
             .transaction(|| {
-                for ((start, end, _), vector) in kept.iter().zip(&frame_vectors) {
+                for (start, end, vector) in &kept {
                     store.add_segment(
                         file.id,
                         SegmentKind::Frame,
@@ -1159,7 +1175,9 @@ impl Indexer {
                         Some(vector),
                     )?;
                 }
+                add_subtitle_segments(store, file.id, &subtitles)?;
                 let mut details = Info::new();
+                details.insert("subtitles".into(), subtitle_source.clone().unwrap_or_else(|| "none".into()));
                 details.insert("duration".into(), format!("{:.1}", info.duration));
                 details.insert("frames".into(), kept.len().to_string());
                 details.insert("sound_windows".into(), sound.len().to_string());
@@ -1181,6 +1199,101 @@ impl Indexer {
             )),
         })
     }
+}
+
+impl Indexer {
+    /// A video's subtitles in windows of about 30 s, each with a meaning vector (when it has words), and where they
+    /// came from. Every line also goes into keyword search, so a quote finds its moment.
+    fn subtitle_windows(&mut self, path: &Path) -> Result<(Vec<SubtitleWindow>, Option<String>), ReadError> {
+        let Some(found) = trovara_extract::subtitles::for_video(path) else {
+            return Ok((Vec::new(), None));
+        };
+        let mut windows: Vec<SubtitleWindow> = Vec::new();
+        for cue in &found.cues {
+            match windows.last_mut() {
+                Some(window) if cue.start - window.start < SUBTITLE_WINDOW => {
+                    window.end = window.end.max(cue.end);
+                    window.text.push('\n');
+                    window.text.push_str(&cue.text);
+                }
+                _ => windows.push(SubtitleWindow { start: cue.start, end: cue.end, text: cue.text.clone(), vector: None }),
+            }
+        }
+        let title = title(path);
+        let worded: Vec<usize> = (0..windows.len()).filter(|&i| has_words(&windows[i].text)).collect();
+        if !worded.is_empty() {
+            let embedder = self.embedder(false)?;
+            for batch in worded.chunks(16) {
+                let prompts: Vec<String> =
+                    batch.iter().map(|&i| Prompts::document(Some(&title), &windows[i].text)).collect();
+                let made = embedder.embed_texts(&prompts).map_err(|e| ReadError::Model(e.to_string()))?;
+                for (&i, vector) in batch.iter().zip(made) {
+                    windows[i].vector = Some(vector);
+                }
+            }
+        }
+        Ok((windows, Some(found.source)))
+    }
+
+    /// Videos read before Trovara read subtitles: only their subtitles now (their frames and sound stay as they are).
+    /// A step of the later pass, once nothing is pending.
+    fn add_missing_subtitles(&mut self, should_stop: &mut dyn FnMut() -> bool) -> Result<(), String> {
+        loop {
+            let videos = self.store.videos_without_subtitles(50).map_err(|e| e.to_string())?;
+            if videos.is_empty() {
+                return Ok(());
+            }
+            for (id, path) in videos {
+                if should_stop() {
+                    return Ok(());
+                }
+                let (windows, source) = match self.subtitle_windows(Path::new(&path)) {
+                    Ok(found) => found,
+                    Err(ReadError::Model(message)) => return Err(message),
+                    Err(ReadError::File(_)) => (Vec::new(), None),
+                };
+                let store = &self.store;
+                store
+                    .transaction(|| {
+                        add_subtitle_segments(store, id, &windows)?;
+                        let mut info = store.info(id)?;
+                        info.insert("subtitles".into(), source.clone().unwrap_or_else(|| "none".into()));
+                        store.set_info(id, &info)
+                    })
+                    .map_err(|e| e.to_string())?;
+                if !windows.is_empty() {
+                    crate::service::say(&format!("subtitles added: {path} ({} windows)", windows.len()));
+                }
+            }
+        }
+    }
+}
+
+/// Subtitle lines are grouped this many seconds at a time for a meaning vector (like the sound's 30 s windows).
+const SUBTITLE_WINDOW: f64 = 30.0;
+
+struct SubtitleWindow {
+    start: f64,
+    end: f64,
+    text: String,
+    vector: Option<Vec<f32>>,
+}
+
+fn add_subtitle_segments(store: &IndexStore, file: i64, windows: &[SubtitleWindow]) -> trovara_core::store::Result<()> {
+    for window in windows {
+        let first_line = window.text.lines().next().unwrap_or_default();
+        store.add_segment(
+            file,
+            SegmentKind::Subtitle,
+            Modality::Text,
+            Some(window.start),
+            Some(window.end),
+            Some(&excerpt(first_line, 160)),
+            Some(&window.text),
+            window.vector.as_deref(),
+        )?;
+    }
+    Ok(())
 }
 
 /// A file that couldn't be read (the run goes on), or the model failing (the run stops).
@@ -1231,6 +1344,7 @@ pub fn options_from(args: &[String]) -> IndexOptions {
             .flat_map(|e| IndexOptions::extensions(e))
             .collect(),
         include_datasets: args.iter().any(|a| a == "--include-datasets"),
+        include_data: args.iter().any(|a| a == "--include-data"),
         code: args.iter().any(|a| a == "--code"),
         code_stretch: crate::value(args, "--code-stretch").and_then(|v| v.parse().ok()).unwrap_or(1800),
         ..IndexOptions::default()
@@ -1334,7 +1448,7 @@ pub fn index(args: &[String]) -> Result<(), String> {
         println!("  dataset, skipped: {folder} ({files} files)");
     }
     let pending = indexer.store.pending_count().map_err(|e| e.to_string())?;
-    let unfinished = indexer.store.unfinished().map_err(|e| e.to_string())?.len();
+    let unfinished = indexer.later_work();
     if pending == 0 && unfinished == 0 {
         println!("up to date");
         return Ok(());

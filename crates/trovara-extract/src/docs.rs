@@ -22,7 +22,12 @@ pub fn text_of(path: &Path) -> Result<String> {
         "odt" => odt(path),
         "rtf" => Ok(rtf(&read_text(path)?)),
         "doc" => legacy_word(path),
-        "html" | "htm" => Ok(plain_text_from_html(&read_text(path)?)),
+        "html" | "htm" | "xhtml" => Ok(plain_text_from_html(&read_text(path)?)),
+        "xlsx" | "xlsm" => crate::office::xlsx(path),
+        "pptx" => crate::office::pptx(path),
+        "epub" => crate::office::epub(path),
+        "eml" => crate::office::eml(path),
+        "msg" => crate::office::msg(path),
         _ => read_text(path),
     }
 }
@@ -84,7 +89,7 @@ pub fn plain_text_from_html(html: &str) -> String {
 
 /// Word-processing XML as the little HTML `plain_text_from_html` reads: paragraph ends become `</p>`, breaks `<br>`,
 /// tabs and spaces a space; every other tag is stripped there.
-fn as_html(xml: &str, paragraphs: &[&str], breaks: &[&str], spaces: &[&str]) -> String {
+pub(crate) fn as_html(xml: &str, paragraphs: &[&str], breaks: &[&str], spaces: &[&str]) -> String {
     let mut text = xml.to_string();
     for tag in paragraphs {
         text = text.replace(&format!("</{tag}>"), "</p>");
@@ -101,7 +106,7 @@ fn as_html(xml: &str, paragraphs: &[&str], breaks: &[&str], spaces: &[&str]) -> 
 }
 
 /// One entry of a zip file, as text (None when it isn't there).
-fn zip_entry(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Result<Option<String>> {
+pub(crate) fn zip_entry(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Result<Option<String>> {
     let mut entry = match archive.by_name(name) {
         Ok(entry) => entry,
         Err(zip::result::ZipError::FileNotFound) => return Ok(None),
@@ -118,7 +123,7 @@ fn zip_entry(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Result
     Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
-fn open_zip(path: &Path) -> Result<zip::ZipArchive<std::fs::File>> {
+pub(crate) fn open_zip(path: &Path) -> Result<zip::ZipArchive<std::fs::File>> {
     let file =
         std::fs::File::open(path).map_err(|error| ExtractError::Unreadable(error.to_string()))?;
     zip::ZipArchive::new(file).map_err(|_| ExtractError::Unreadable("not a zip file".into()))

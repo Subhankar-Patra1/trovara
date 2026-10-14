@@ -88,6 +88,8 @@ pub enum SegmentKind {
     Lines,
     /// A stretch of a notebook: `loc` to `loc_end` are its first and last cells, from 1.
     Cells,
+    /// A video's subtitle lines over about 30 s: `loc` to `loc_end` are seconds (PRD F-RD-13).
+    Subtitle,
 }
 
 impl SegmentKind {
@@ -103,6 +105,7 @@ impl SegmentKind {
             SegmentKind::Frame => "frame",
             SegmentKind::Lines => "lines",
             SegmentKind::Cells => "cells",
+            SegmentKind::Subtitle => "subtitle",
         }
     }
 }
@@ -144,6 +147,8 @@ pub struct IndexOptions {
     /// A notebook's file holds its outputs too: bigger than this, it isn't read.
     pub max_notebook_bytes: u64,
     pub include_code: bool,
+    /// Data and config files (json, yaml, xml, log, ini…) read as text in normal search (PRD F-RD-15: opt-in).
+    pub include_data: bool,
     pub include_datasets: bool,
     pub min_image_side: u32,
     /// PDFs up to this many pages are read whole in the first pass.
@@ -177,6 +182,7 @@ impl Default for IndexOptions {
             max_code_bytes: 1 << 20,
             max_notebook_bytes: 20 << 20,
             include_code: false,
+            include_data: false,
             include_datasets: false,
             min_image_side: 256,
             big_pdf_pages: 50,

@@ -26,8 +26,12 @@ pub const RAW_EXTENSIONS: &[&str] = &[
     "pef", "srw", "x3f", "3fr", "erf", "kdc", "mef", "mos", "mrw",
 ];
 pub const DOC_EXTENSIONS: &[&str] = &[
-    "txt", "text", "md", "markdown", "rtf", "docx", "doc", "odt", "html", "htm",
+    "txt", "text", "md", "markdown", "rtf", "docx", "doc", "odt", "html", "htm", "xhtml",
+    // Office, e-books, saved emails, tables (PRD F-RD-10/11/12/14).
+    "xlsx", "xlsm", "pptx", "epub", "eml", "msg", "csv", "tsv",
 ];
+/// Data and config files, read as text only when the person asks for them (PRD F-RD-15: they flood results).
+pub const DATA_EXTENSIONS: &[&str] = &["json", "yaml", "yml", "xml", "log", "ini", "toml", "cfg", "conf"];
 pub const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "m4a", "m4b", "aac", "wav", "wave", "flac", "ogg", "oga", "opus", "aiff", "aif", "wma",
     "amr", "caf", "mka",
@@ -168,6 +172,9 @@ pub fn classify(path: &Path, options: &IndexOptions) -> Classification {
         return Classification::Skip("code or data file");
     }
     if DOC_EXTENSIONS.contains(&ext.as_str()) {
+        return Classification::Index(FileKind::Doc);
+    }
+    if options.include_data && DATA_EXTENSIONS.contains(&ext.as_str()) {
         return Classification::Index(FileKind::Doc);
     }
     if CODE_EXTENSIONS.contains(&ext.as_str()) {
@@ -364,10 +371,7 @@ pub fn skip_reason_for_folder(
     if system.iter().any(|s| crate::store::path_key(s) == key) {
         return Some("Windows or app folder");
     }
-    if excluded.iter().any(|s| {
-        let s = crate::store::path_key(s);
-        key == s || key.starts_with(&format!("{s}\\"))
-    }) {
+    if excluded.iter().any(|s| crate::store::within(&key, &crate::store::path_key(s))) {
         return Some("excluded folder");
     }
     None
@@ -486,6 +490,22 @@ pub fn title(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn office_books_mail_tables_and_opt_in_data() {
+        let normal = IndexOptions::default();
+        for name in ["budget.xlsx", "deck.pptx", "novel.epub", "note.eml", "mail.msg", "rows.csv", "page.xhtml"] {
+            assert_eq!(classify(Path::new(&format!(r"C:\docs\{name}")), &normal), Classification::Index(FileKind::Doc), "{name}");
+        }
+        // Data and config files: skipped unless asked for.
+        assert_eq!(classify(Path::new(r"C:\docs\settings.json"), &normal), Classification::Skip("code or data file"));
+        let with_data = IndexOptions { include_data: true, ..IndexOptions::default() };
+        for name in ["settings.json", "app.yaml", "feed.xml", "server.log", "setup.ini"] {
+            assert_eq!(classify(Path::new(&format!(r"C:\docs\{name}")), &with_data), Classification::Index(FileKind::Doc), "{name}");
+        }
+        // Code stays out either way.
+        assert_eq!(classify(Path::new(r"C:\docs\retry.py"), &with_data), Classification::Skip("code or data file"));
+    }
 
     #[test]
     fn code_folder_types() {

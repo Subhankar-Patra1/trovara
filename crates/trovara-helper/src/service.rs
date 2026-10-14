@@ -366,12 +366,7 @@ impl Service {
                 }
             }
             let pending = self.indexer.store.pending_count().unwrap_or(0);
-            let unfinished = self
-                .indexer
-                .store
-                .unfinished()
-                .map(|u| u.len())
-                .unwrap_or(0);
+            let unfinished = self.indexer.later_work();
             if pending == 0 && unfinished > 0 && self.backfill_blocker().is_none() {
                 if !self.finish_long_files() {
                     break;
@@ -473,10 +468,7 @@ impl Service {
                 Some(changed) => folders.extend(
                     changed
                         .iter()
-                        .filter(|f| {
-                            let k = trovara_core::store::path_key(f);
-                            k == key || k.starts_with(&format!("{key}\\"))
-                        })
+                        .filter(|f| trovara_core::store::within(&trovara_core::store::path_key(f), &key))
                         .cloned(),
                 ),
                 None => whole.push(root.clone()),
@@ -645,13 +637,7 @@ impl Service {
             if requests.sync || std::mem::take(&mut requests.changed) {
                 return true;
             }
-            let has_work = self.indexer.store.pending_count().unwrap_or(0) > 0
-                || self
-                    .indexer
-                    .store
-                    .unfinished()
-                    .map(|u| !u.is_empty())
-                    .unwrap_or(false);
+            let has_work = self.indexer.store.pending_count().unwrap_or(0) > 0 || self.indexer.later_work() > 0;
             if has_work
                 && !requests.paused
                 && requests.backfill
@@ -783,15 +769,12 @@ fn watch(
         // skipped (only the part inside the root counts: a root may itself sit under a "Temp" or a ".cache").
         let counts = |path: &Path| {
             let key = trovara_core::store::path_key(&path.to_string_lossy());
-            if ignore
-                .iter()
-                .any(|i| key == *i || key.starts_with(&format!("{i}\\")))
-            {
+            if ignore.iter().any(|i| trovara_core::store::within(&key, i)) {
                 return false;
             }
             let Some(root) = root_keys
                 .iter()
-                .filter(|r| key == **r || key.starts_with(&format!("{r}\\")))
+                .filter(|r| trovara_core::store::within(&key, r))
                 .max_by_key(|r| r.len())
             else {
                 return false;

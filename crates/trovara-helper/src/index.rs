@@ -178,6 +178,7 @@ fn location(hit: &trovara_core::SearchHit) -> String {
         SegmentKind::Page | SegmentKind::PageImage => format!("p. {}", loc as i64),
         SegmentKind::Audio => format!("at {} (sound)", clock(loc)),
         SegmentKind::Frame => format!("at {}", clock(loc)),
+        SegmentKind::Subtitle => format!("said at {}", clock(loc)),
         SegmentKind::Chunk => format!("part {}", loc as i64),
         SegmentKind::Lines | SegmentKind::Cells => {
             let what = if hit.segment == SegmentKind::Cells { "cells" } else { "lines" };

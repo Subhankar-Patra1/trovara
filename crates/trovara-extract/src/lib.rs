@@ -4,7 +4,9 @@
 
 pub mod docs;
 pub mod exif;
+pub mod office;
 pub mod pdf;
+pub mod subtitles;
 pub mod svg;
 pub mod text;
 
