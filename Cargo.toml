@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/trovara-core",
+    "crates/trovara-win",
+    "crates/trovara-extract",
+    "crates/trovara-llama",
+    "crates/trovara-helper",
+    "crates/trovara-usn",
+    "app/src-tauri",
+]
+
+[workspace.package]
+version = "1.0.0-beta.1"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+license = "MIT"
+repository = "https://github.com/Subhankar-Patra1/trovara"
+authors = ["Subhankar Patra"]
+
+[workspace.dependencies]
+trovara-core = { path = "crates/trovara-core" }
+trovara-win = { path = "crates/trovara-win" }
+trovara-extract = { path = "crates/trovara-extract" }
+trovara-llama = { path = "crates/trovara-llama" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# The helper does the heavy work (embedding, decoding, scoring): optimised for speed.
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+panic = "abort"
+strip = true
