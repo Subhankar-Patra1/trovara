@@ -4,6 +4,47 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Match the native window boundary to the panel's 18 px CSS corner radius.
+pub fn fit_panel_frame(panel: &tauri::WebviewWindow) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::{HWND, RECT};
+        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE};
+        use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, DeleteObject, SetWindowRgn};
+        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+        let (Ok(handle), Ok(scale)) = (panel.hwnd(), panel.scale_factor()) else { return };
+        let hwnd = HWND(handle.0);
+        let mut bounds = RECT::default();
+        let border = DWMWA_COLOR_NONE;
+        // SAFETY: hwnd belongs to the panel. Each pointer refers to data that outlives its call.
+        unsafe {
+            // Windows 11 draws this border separately from the shadow. Windows 10 ignores this attribute.
+            let _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, (&border as *const u32).cast(),
+                                          std::mem::size_of_val(&border) as u32);
+            if GetWindowRect(hwnd, &mut bounds).is_err() {
+                return;
+            }
+            let width = bounds.right - bounds.left;
+            let height = bounds.bottom - bounds.top;
+            if width <= 0 || height <= 0 {
+                return;
+            }
+            let diameter = (36.0 * scale).round() as i32;
+            let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, diameter, diameter);
+            if region.is_invalid() {
+                return;
+            }
+            // Windows owns the region after a successful call. Free it only if the call fails.
+            if SetWindowRgn(hwnd, Some(region), true) == 0 {
+                let _ = DeleteObject(region.into());
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = panel;
+}
+
 /// Puts files on the clipboard as Explorer does (CF_HDROP, marked "copy"): pasting makes copies, never moves them.
 #[cfg(windows)]
 pub fn copy_files(paths: &[String]) -> Result<(), String> {

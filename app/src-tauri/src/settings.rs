@@ -33,6 +33,8 @@ pub struct Settings {
     pub paused: bool,
     /// Code search (PRD §6.9): off until turned on.
     pub code: CodeSettings,
+    /// Also read data and config files (json, yaml, xml, log, ini…) as text (PRD F-RD-15): off by default.
+    pub include_data: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -63,6 +65,7 @@ impl Default for Settings {
             check_updates: true,
             paused: false,
             code: CodeSettings::default(),
+            include_data: false,
         }
     }
 }

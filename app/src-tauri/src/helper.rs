@@ -148,9 +148,10 @@ impl SearchService {
         Ok(Searching { child, stdin, pending })
     }
 
-    pub fn stop(&self) {
+    /// Asks it to quit, and ends it if it hasn't within `patience`.
+    pub fn stop_within(&self, patience: Duration) {
         if let Some(searching) = self.running.lock().unwrap().take() {
-            stop(searching.child, searching.stdin, &json!({"op": "quit"}).to_string(), Duration::from_secs(2));
+            stop(searching.child, searching.stdin, &json!({"op": "quit"}).to_string(), patience);
         }
     }
 }
@@ -222,10 +223,17 @@ impl IndexService {
         running.as_mut().is_some_and(|indexing| matches!(indexing.child.try_wait(), Ok(None)))
     }
 
+    /// Stops it, letting it finish the file it's reading (up to 8 s): for a restart with other settings.
     pub fn stop(&self) {
+        self.stop_within(Duration::from_secs(8));
+    }
+
+    /// Asks it to stop, and ends it if it hasn't within `patience` (quitting: a file left half-read is read again
+    /// next time; the index is a transaction away from consistent at any moment).
+    pub fn stop_within(&self, patience: Duration) {
         self.generation.fetch_add(1, Ordering::SeqCst);
         if let Some(indexing) = self.running.lock().unwrap().take() {
-            stop(indexing.child, indexing.stdin, "stop", Duration::from_secs(8));
+            stop(indexing.child, indexing.stdin, "stop", patience);
         }
     }
 }

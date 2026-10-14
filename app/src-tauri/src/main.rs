@@ -31,7 +31,11 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 
-const PANEL_WIDTH: f64 = 780.0;
+/// The panel at its biggest (logical pixels), and the share of the screen it may take: large enough for a page or a
+/// picture to be read in its preview, never crowding a small screen.
+const PANEL_WIDTH: f64 = 1000.0;
+const PANEL_RESULTS_HEIGHT: f64 = 640.0;
+const PANEL_MIN_WIDTH: f64 = 680.0;
 const FIELD_HEIGHT: f64 = 56.0;
 /// Both model files together (TRD §12.4), for one progress bar over the two downloads.
 const MODEL_BYTES: f64 = 864_676_480.0;
@@ -58,6 +62,10 @@ struct Shell {
     code_has_model: AtomicBool,
     /// The main index's status line, for the tray to go back to after code indexing has said its piece.
     main_status: Mutex<String>,
+    /// The panel's width and results height for the screen it last opened on (logical pixels).
+    panel_size: Mutex<(f64, f64)>,
+    /// The height the panel's page last asked for (its field alone, or results).
+    panel_height: Mutex<f64>,
     /// The hotkey registered now (empty: none is).
     hotkey_now: Mutex<String>,
     tray: Mutex<Option<TrayItems>>,
@@ -69,6 +77,22 @@ struct Shell {
     /// Debug runs with setup: the panel's query waits until the first index is in.
     debug_query_sent: AtomicBool,
     logs: PathBuf,
+    /// What each folder holds, as `estimate` last counted it (key: `folder_key`), kept in `folder-counts.json` next
+    /// to the settings. Shown at once by Choose Folders…; counted again only after the index saw files change.
+    counts: Mutex<FolderCounts>,
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct FolderCounts {
+    folders: HashMap<String, Value>,
+    /// Folders counted before the index last saw files added, changed, moved or removed: shown, then counted again.
+    stale: std::collections::HashSet<String>,
+}
+
+/// A folder as a key: Windows paths compare without case, and either slash, with no trailing one.
+fn folder_key(folder: &str) -> String {
+    let key = folder.replace('/', "\\").to_lowercase();
+    if key.len() > 3 { key.trim_end_matches('\\').to_string() } else { key }
 }
 
 struct TrayItems {
@@ -106,6 +130,39 @@ impl Shell {
         Launch { program: self.options.helper.clone(), args, env: self.env(), log: Some(self.logs.join(log)) }
     }
 
+    fn counts_path(&self) -> PathBuf {
+        self.settings_path.with_file_name("folder-counts.json")
+    }
+
+    fn remember_counts(&self, answers: &[Value]) {
+        let mut counts = self.counts.lock().unwrap();
+        for answer in answers {
+            // A folder that couldn't be read is counted again next time.
+            let Some(folder) = answer["folder"].as_str().filter(|_| answer["readable"] != json!(false)) else { continue };
+            let key = folder_key(folder);
+            counts.stale.remove(&key);
+            counts.folders.insert(key, answer.clone());
+        }
+        self.save_counts(&counts);
+    }
+
+    /// The index saw files change: every count is shown as it was, and counted again.
+    fn counts_changed(&self) {
+        let mut counts = self.counts.lock().unwrap();
+        if counts.folders.len() == counts.stale.len() {
+            return;
+        }
+        let keys: Vec<String> = counts.folders.keys().cloned().collect();
+        counts.stale.extend(keys);
+        self.save_counts(&counts);
+    }
+
+    fn save_counts(&self, counts: &FolderCounts) {
+        if let Ok(text) = serde_json::to_string(counts) {
+            let _ = std::fs::write(self.counts_path(), text);
+        }
+    }
+
     fn index_arguments(&self) -> Vec<String> {
         self.options.index.iter().flat_map(|index| ["--index".to_string(), index.display().to_string()]).collect()
     }
@@ -116,6 +173,9 @@ impl Shell {
         let settings = self.settings.lock().unwrap().clone();
         let yes_no = |on: bool| if on { "yes" } else { "no" }.to_string();
         let mut args = vec!["index-service".to_string(), "--watch".into(), "--backfill".into(), "--prune".into()];
+        if settings.include_data {
+            args.push("--include-data".into());
+        }
         args.extend(self.index_arguments());
         let priority = if settings.priority.is_empty() { "auto".to_string() } else { settings.priority.clone() };
         args.extend(["--priority".into(), priority]);
@@ -292,9 +352,21 @@ fn hide_panel(app: AppHandle) {
 /// The panel grows to show results and shrinks back to its field.
 #[tauri::command]
 fn panel_height(app: AppHandle, height: f64) {
+    let shell = app.state::<Arc<Shell>>();
+    *shell.panel_height.lock().unwrap() = height;
+    let (width, most) = *shell.panel_size.lock().unwrap();
     if let Some(panel) = app.get_webview_window("panel") {
-        let _ = panel.set_size(LogicalSize::new(PANEL_WIDTH, height.clamp(FIELD_HEIGHT, 640.0)));
+        let _ = panel.set_size(LogicalSize::new(width, height.clamp(FIELD_HEIGHT, most)));
     }
+}
+
+/// The panel's width and results height on `screen`: up to 1000 × 640, at most 75% × 70% of the screen.
+fn panel_size_for(screen: &tauri::Monitor) -> (f64, f64) {
+    let scale = screen.scale_factor().max(0.5);
+    let (logical_width, logical_height) = (screen.size().width as f64 / scale, screen.size().height as f64 / scale);
+    let width = (logical_width * 0.75).min(PANEL_WIDTH).max(PANEL_MIN_WIDTH.min(logical_width - 32.0));
+    let height = (logical_height * 0.7).clamp(FIELD_HEIGHT * 4.0, PANEL_RESULTS_HEIGHT);
+    (width, height)
 }
 
 /// Ctrl+O in the panel: the search window, with the panel's query.
@@ -314,7 +386,22 @@ fn close_window(window: WebviewWindow) {
 
 /// What indexing these folders would take, one answer per folder (`trovara-helper estimate --json`).
 #[tauri::command]
-async fn estimate(shell: State<'_, Arc<Shell>>, folders: Vec<String>) -> Result<Vec<Value>, String> {
+async fn estimate(shell: State<'_, Arc<Shell>>, folders: Vec<String>, cached: Option<bool>) -> Result<Vec<Value>, String> {
+    // The counts in hand, each with "stale" when files changed since (the page counts those again, quietly).
+    if cached == Some(true) {
+        let counts = shell.counts.lock().unwrap();
+        return Ok(folders
+            .iter()
+            .filter_map(|folder| {
+                let key = folder_key(folder);
+                let mut answer = counts.folders.get(&key)?.clone();
+                answer["folder"] = json!(folder);
+                answer["stale"] = json!(counts.stale.contains(&key));
+                Some(answer)
+            })
+            .collect());
+    }
+    let shell = shell.inner().clone();
     let (helper, env) = (shell.options.helper.clone(), shell.env());
     let mut args = vec!["estimate".to_string()];
     args.extend(shell.index_arguments());
@@ -323,7 +410,9 @@ async fn estimate(shell: State<'_, Arc<Shell>>, folders: Vec<String>) -> Result<
     tauri::async_runtime::spawn_blocking(move || {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let output = helper::run_once(&helper, &args, &env)?;
-        Ok(output.lines().filter_map(|line| serde_json::from_str(line).ok()).collect())
+        let answers: Vec<Value> = output.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
+        shell.remember_counts(&answers);
+        Ok(answers)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -730,13 +819,19 @@ fn setup(app: &mut tauri::App, options: Options) -> Result<(), Box<dyn std::erro
         code_has_model: AtomicBool::new(false),
         main_status: Mutex::new(String::new()),
         hotkey_now: Mutex::new(String::new()),
+        panel_size: Mutex::new((PANEL_WIDTH, PANEL_RESULTS_HEIGHT)),
+        panel_height: Mutex::new(FIELD_HEIGHT),
         tray: Mutex::new(None),
         reloaded: Mutex::new([Instant::now(); 2]),
         restarts: Mutex::new([Vec::new(), Vec::new()]),
         quitting: AtomicBool::new(false),
         debug_query_sent: AtomicBool::new(false),
         logs,
+        counts: Mutex::new(FolderCounts::default()),
     });
+    if let Some(counts) = std::fs::read_to_string(shell.counts_path()).ok().and_then(|text| serde_json::from_str(&text).ok()) {
+        *shell.counts.lock().unwrap() = counts;
+    }
     app.manage(shell.clone());
     app.manage(updates::Updates::default());
 
@@ -917,16 +1012,28 @@ fn apply_launch_at_login(app: &AppHandle) {
     }
 }
 
+/// Quitting (or updating): every helper is asked to stop at once and given a moment, then ended. They used to go one
+/// after another, each allowed 8 s to finish its file, so quitting while a movie was being read took up to 18 s.
 fn stop_helpers(app: &AppHandle) {
-    let shell = app.state::<Arc<Shell>>();
+    let shell = app.state::<Arc<Shell>>().inner().clone();
     shell.quitting.store(true, Ordering::SeqCst);
     shell.model.stop();
-    shell.index.stop();
-    shell.code_index.stop();
-    shell.search.stop();
+    let patience = Duration::from_millis(1500);
+    std::thread::scope(|scope| {
+        scope.spawn(|| shell.index.stop_within(patience));
+        scope.spawn(|| shell.code_index.stop_within(patience));
+        scope.spawn(|| shell.search.stop_within(patience));
+    });
 }
 
 fn quit(app: &AppHandle) {
+    // Gone from the screen at once; the helpers are stopped behind it.
+    for window in app.webview_windows().values() {
+        let _ = window.hide();
+    }
+    if let Some(tray) = app.tray_by_id("trovara") {
+        let _ = tray.set_visible(false);
+    }
     stop_helpers(app);
     // A downloaded update installs as Trovara quits (it starts again after).
     if updates::install_ready(app) {
@@ -966,7 +1073,8 @@ fn make_panel(app: &AppHandle) -> tauri::Result<()> {
         .inner_size(PANEL_WIDTH, FIELD_HEIGHT)
         .decorations(false)
         .transparent(true)
-        .shadow(true)
+        // Windows adds a rectangular border when the native shadow is enabled.
+        .shadow(false)
         .resizable(false)
         .maximizable(false)
         .minimizable(false)
@@ -974,8 +1082,13 @@ fn make_panel(app: &AppHandle) -> tauri::Result<()> {
         .skip_taskbar(true)
         .visible(false)
         .build()?;
+    win::fit_panel_frame(&panel);
+    let frame_panel = panel.clone();
     let app = app.clone();
     panel.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
+            win::fit_panel_frame(&frame_panel);
+        }
         // It steps away when you click elsewhere.
         if let WindowEvent::Focused(false) = event {
             if !app.state::<Arc<Shell>>().options.debug_show {
@@ -995,7 +1108,13 @@ fn show_panel(app: &AppHandle) {
     // On the screen with the pointer, centered, a fifth of the way down.
     if let Ok(pointer) = app.cursor_position() {
         if let Ok(Some(screen)) = app.monitor_from_point(pointer.x, pointer.y) {
-            let width = (PANEL_WIDTH * screen.scale_factor()) as i32;
+            // Sized for this screen (a laptop's and a big monitor's differ), at the height it had.
+            let shell = app.state::<Arc<Shell>>();
+            let (panel_width, most) = panel_size_for(&screen);
+            *shell.panel_size.lock().unwrap() = (panel_width, most);
+            let height = shell.panel_height.lock().unwrap().clamp(FIELD_HEIGHT, most);
+            let _ = panel.set_size(LogicalSize::new(panel_width, height));
+            let width = (panel_width * screen.scale_factor()) as i32;
             let x = screen.position().x + (screen.size().width as i32 - width) / 2;
             let y = screen.position().y + (screen.size().height as f64 * 0.2) as i32;
             let _ = panel.set_position(PhysicalPosition::new(x, y));
@@ -1059,7 +1178,7 @@ fn show_settings(app: &AppHandle) -> tauri::Result<()> {
     }
     WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("settings.html".into()))
         .title("Trovara Settings")
-        .inner_size(700.0, 680.0)
+        .inner_size(820.0, 640.0)
         .min_inner_size(560.0, 480.0)
         .center()
         .build()?;
@@ -1225,7 +1344,13 @@ fn index_event(app: &AppHandle, event: Value, code: bool) {
             set_status(app, &format!("Reading the rest of long files ({} of {})", count("done"), count("total")));
             reload(app, false, false);
         }
-        "sync" => reload(app, false, false),
+        "sync" => {
+            // Files added, changed, moved or removed: the folders' counts are counted again when next shown.
+            if ["added", "changed", "moved", "removed"].iter().any(|key| count(key) > 0) {
+                app.state::<Arc<Shell>>().counts_changed();
+            }
+            reload(app, false, false);
+        }
         "summary" => reload(app, true, false),
         "idle" => {
             set_status(app, &format!("Up to date · {}", files(count("searchable"))));
