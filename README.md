@@ -1,87 +1,144 @@
-# Trovara
+<p align="center">
+  <img src="assets/logo.png" alt="Trovara" width="128" height="128">
+</p>
 
-**Describe it. Find it.** Local, private search for the files on your Windows PC by what's in them: pictures,
-screenshots, PDFs, documents, recordings, videos and code. It runs on Google DeepMind's EmbeddingGemma 2, entirely on
-your PC.
+<h1 align="center">Trovara</h1>
 
-Press **Ctrl+Shift+Space** (you can change it), describe what you're looking for in any language, and Trovara opens
-the match at the right place: the video at the moment, the PDF at the page, the code at the line.
+<p align="center">
+  <b>Describe it. Find it.</b><br>
+  Private search for everything on your Windows PC, by what's <i>in</i> it.
+</p>
 
-> Status: early development. Done: M0 (build setup), M1 (EmbeddingGemma 2 on llama.cpp, GPU via Vulkan, vectors
-> matching the reference at cosine ≥ 0.9998), M2 (SQLite index, hybrid search: 26 ms at 100k vectors), M3 (pictures in every Windows format, PDFs, Word/OpenDocument/RTF/HTML/legacy .doc), M4 (OCR of screenshots and scanned pages), M5 (audio and video at the moment), M6 (background indexer: rules, moves, live watching, power rules, watchdog, estimates, opt-in NTFS fast catch-up), M7 (the app: tray, hotkey panel, search window, setup, settings), M8 (code search: `code:` finds code by what it does or by a name, opening at the defining line in your editor), M9 (a 16 MB per-user installer, signed updates, uninstall). See
-> [docs/PRD.md](docs/PRD.md) for what it will do and [docs/TRD.md](docs/TRD.md) for how.
->
-> Try it:
-> ```powershell
-> trovara-helper download-model
-> trovara-helper index $HOME\Pictures $HOME\Documents   # pictures, PDFs, documents, audio, video
-> trovara-helper search "a dog on the beach"
-> ```
-> Or the app: `cargo build --release --workspace`, then run `target\release\trovara.exe`. Setup opens on the
-> first launch; after that, Ctrl+Shift+Space opens the search panel from any app.
-> Or the app: `cargo build --release --workspace`, then run `target
-elease	rovara.exe`. Setup opens on the
-> first launch; after that, Ctrl+Shift+Space opens the search panel from any app.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6" alt="Windows 10 and 11">
+  <img src="https://img.shields.io/badge/status-beta-orange" alt="Beta">
+  <img src="https://img.shields.io/badge/runs-100%25%20on%20your%20PC-success" alt="Runs on your PC">
+</p>
 
-## Layout
+<p align="center">
+  <img src="assets/demo.gif" alt="Trovara finding a photo, a screenshot by its text, a PDF page and code" width="800">
+</p>
 
-| Path | What |
+Press **Ctrl+Shift+Space** from any app and describe what you're looking for, the way you remember it, in any
+language. Trovara finds pictures, screenshots, PDFs, documents, recordings, videos and code, and opens the match at
+the right place: the PDF at the page, the video at the moment, the code at the line.
+
+It runs Google DeepMind's EmbeddingGemma 2 on your own PC (on your GPU when there is one). Nothing you index ever
+leaves it.
+
+## What it finds
+
+| You type | Trovara finds |
 |---|---|
-| `crates/trovara-core` | Engine: kinds, options, prompts, model pins, paths (and later the crawler, index, search) |
-| `crates/trovara-win` | Windows platform layer: WIC, OCR, Media Foundation, power, file IDs, shell actions |
-| `crates/trovara-extract` | Readers: PDF, documents, code |
-| `crates/trovara-llama` | EmbeddingGemma 2 on llama.cpp |
-| `crates/trovara-helper` | The worker process and CLI |
-| `crates/trovara-usn` | Small elevated NTFS change-journal reader (opt-in fast catch-up) |
-| `app/` | The app (Tauri 2): tray, hotkey panel, search window, setup, settings |
-| `scripts/` | Build scripts |
-| `evals/` | Ranking evals |
-| `docs/` | PRD and TRD |
+| `red car` | The photo of a red car, even if it's named `DSC_1001.png` |
+| `payment declined` | The screenshot with those words on screen (read with Windows' own OCR) |
+| `security deposit` | The page of the lease that says so, the words marked yellow |
+| `the scene at the lake` | The moment in a video, and it plays from there |
+| `what the teacher said about exams` | The minute of a recording where it's said |
+| `code: refresh the access token` | The function that does it, opened at its line in your editor |
 
-## Build
+## Features
 
-You need:
-- Rust (stable, MSVC toolchain)
-- Visual Studio 2022 or 2026 with "Desktop development with C++"
-- Git
-- Optionally the Vulkan SDK, for GPU support
+- **Search by meaning and by words at once.** Results appear as you type, and meaning results follow when you pause.
+  A file's name counts too: `pan card` finds `PAN_Card_Front_View.jpeg`.
+- **Every kind of file.** JPEG, PNG, HEIC, WebP and RAW photos. Screenshots and scanned PDFs are read with OCR. PDF,
+  Word, Excel, PowerPoint, OpenDocument, RTF, EPUB, Markdown, emails (`.eml`, `.msg`), CSV. MP3, WAV, M4A. MP4,
+  MKV and AVI, including their subtitles.
+- **Previews that show why it matched.** The found words are marked yellow, on the PDF page itself, in screenshots,
+  in documents and in code. Markdown is shown formatted and code is coloured.
+- **A large viewer.** Press **Space**, or click the preview, to see the file large. Zoom with Ctrl + mouse wheel and
+  turn PDF pages with ← / →.
+- **Code search.** Add your repos, then search with `code:` by what the code does or by a name in it. It opens in
+  VS Code, Cursor, Visual Studio, JetBrains IDEs, Sublime Text, Notepad++, Zed and others.
+- **Stays up to date by itself.** New and changed files are read as they arrive. Indexing waits while you game or
+  watch something fullscreen, and goes easy on battery.
+- **Private by design.** No account and no cloud. The index lives in `%LOCALAPPDATA%\Trovara`.
+
+## Install
+
+1. Download `Trovara_<version>_x64-setup.exe` from [Releases](https://github.com/Subhankar-Patra1/trovara/releases).
+2. Run it. It installs for you only, so no administrator rights are needed. On the last page, keep
+   **Create desktop shortcut** ticked if you want an icon on the desktop.
+3. Setup asks which folders to search, then downloads the model once (865 MB) and starts reading your files in the
+   background. You can search right away: files are found by name until they've been read.
+
+Windows 10 (22H2) or Windows 11, 64-bit, with 8 GB of RAM (16 GB recommended) and about 2 GB of free disk space.
+A GPU with Vulkan makes indexing about 10× faster, but none is needed.
+
+## Keys
+
+| Key | Does |
+|---|---|
+| **Ctrl+Shift+Space** | Open the search panel (you can change it in Settings) |
+| **↑ / ↓** | Move between results |
+| **Space** | View the result large |
+| **Enter** | Open it, at the page or moment |
+| **Ctrl+Enter** | Show it in Explorer |
+| **Ctrl+C** | Copy the file, to paste into a chat, a mail or a folder |
+| **Ctrl+O** | Open the larger search window, with filters by kind |
+| **Tab** | Search the same words in your code |
+| **Esc** | Close |
+
+## Privacy
+
+Trovara goes online for three things only: to download the model once, to check for updates (you can turn this off),
+and to fetch optional add-ons you ask for. Your files, your searches and the index never leave your PC.
+
+## Build from source
+
+You need Rust (stable, MSVC toolchain), Visual Studio 2022 or 2026 with "Desktop development with C++", Git, and
+optionally the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) for GPU support.
 
 ```powershell
 scripts\build-llama.ps1     # llama.cpp at the pinned tag → vendor\llama (a few minutes)
 scripts\fetch-vendor.ps1    # PDFium → vendor\pdfium
-cargo build --release
-cargo test --workspace
-target\release\trovara-helper.exe version
+cargo build --release --workspace
+target\release\trovara.exe
 ```
 
-Install the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) before running `build-llama.ps1` to build the GPU
-backend. Add `-Cuda` for the optional CUDA pack (needs the CUDA toolkit).
+`vendor\` and `third_party\llama.cpp\` aren't in the repository: the two scripts above fetch and build them. Add
+`-Cuda` to `build-llama.ps1` for the optional CUDA pack (needs the CUDA toolkit).
 
-## Release
-
-You also need Node.js (for the Tauri CLI, installed into `app\node_modules` on first use).
+To build the installer you also need Node.js, for the Tauri CLI:
 
 ```powershell
-scripts\release.ps1                      # → target\release\bundle\nsis\Trovara_<version>_x64-setup.exe (~16 MB)
-scripts\release.ps1 -UpdateUrl https://github.com/Subhankar-Patra1/trovara/releases/latest/download/latest.json `
-                    -DownloadBase https://github.com/Subhankar-Patra1/trovara/releases/download/v<version>
+scripts\release.ps1         # → target\release\bundle\nsis\Trovara_<version>_x64-setup.exe (~16 MB)
 ```
 
-- **Updates:** builds with `-UpdateUrl` check that feed daily. Upload the installer, its `.sig` and `latest.json` to
-  the release. The signing key is `%USERPROFILE%\.trovara\updater.key`, with its password beside it. Keep both
-  private and backed up: without them no update can be shipped to existing installs.
-- **Code signing:** set `TROVARA_SIGN_PFX` (+ `TROVARA_SIGN_PASSWORD`), `TROVARA_SIGN_THUMBPRINT`, or
-  `TROVARA_SIGN_DLIB` + `TROVARA_SIGN_METADATA` (Azure Trusted Signing). Without one the build is unsigned.
-- **Licenses:** `scripts\acknowledgements.ps1` regenerates `Acknowledgements.txt`. The release script runs it.
+<details>
+<summary>The command-line helper</summary>
 
-## Privacy
+```powershell
+trovara-helper download-model
+trovara-helper index $HOME\Pictures $HOME\Documents
+trovara-helper search "a dog on the beach"
+trovara-helper status
+```
 
-Nothing you index leaves your PC. Trovara goes online only to download the model once, to check for updates (which you
-can turn off), and to fetch optional add-ons you ask for.
+</details>
+
+<details>
+<summary>Project layout</summary>
+
+| Path | What |
+|---|---|
+| `crates/trovara-core` | The engine: index, ranking, rules, code search |
+| `crates/trovara-win` | Windows layer: WIC, OCR, Media Foundation, power, file IDs |
+| `crates/trovara-extract` | Readers: PDF, Office, EPUB, email, subtitles, code |
+| `crates/trovara-llama` | EmbeddingGemma 2 on llama.cpp |
+| `crates/trovara-helper` | The background worker and the CLI |
+| `crates/trovara-usn` | A small reader of the NTFS change journal (optional fast catch-up after a restart) |
+| `app/` | The app (Tauri 2): tray, hotkey panel, search window, setup, settings |
+| `scripts/` | Build and release scripts |
+| `evals/` | Ranking evals |
+
+</details>
 
 ## License
 
-[MIT](LICENSE) © 2026 Subhankar Patra. Trovara ships third-party components under their own licenses; see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the `Acknowledgements.txt` beside the installed app (Settings →
-About → Licenses). The EmbeddingGemma 2 model isn't part of Trovara: it's downloaded on first launch under Google's
-[Gemma Terms of Use](https://ai.google.dev/gemma/terms).
+[MIT](LICENSE) © 2026 Subhankar Patra.
+
+Trovara ships third-party components under their own licenses: see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md),
+and Settings → About → Licenses in the app. The EmbeddingGemma 2 model isn't part of Trovara. It's downloaded on first
+launch under Google's [Gemma Terms of Use](https://ai.google.dev/gemma/terms).
