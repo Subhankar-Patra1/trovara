@@ -1,0 +1,20 @@
+[package]
+name = "trovara-extract"
+description = "Trovara's readers: PDF (PDFium), documents (docx, odt, rtf, doc, html, txt), EXIF, SVG"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+links = "pdfium"
+
+[dependencies]
+trovara-core.workspace = true
+regex = "1"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+cfb = "0.15"
+kamadak-exif = "0.6"
+encoding_rs = "0.8"
+resvg = "0.48"
