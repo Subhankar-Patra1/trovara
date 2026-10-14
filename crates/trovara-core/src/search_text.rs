@@ -143,6 +143,66 @@ pub fn matches(word: &str, text: &str) -> Vec<Range<usize>> {
     found
 }
 
+/// What a preview marks for `words` in `text` (PRD F-PRE-02): every match of each word, merged where they touch or
+/// overlap, in order, as byte ranges.
+pub fn mark_ranges(words: &[String], text: &str) -> Vec<Range<usize>> {
+    let mut ranges: Vec<Range<usize>> = words
+        .iter()
+        .filter(|word| word.chars().count() >= 2)
+        .flat_map(|word| matches(word, text))
+        .collect();
+    ranges.sort_by_key(|range| (range.start, std::cmp::Reverse(range.end)));
+    let mut merged: Vec<Range<usize>> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        match merged.last_mut() {
+            Some(last) if range.start <= last.end => last.end = last.end.max(range.end),
+            _ => merged.push(range),
+        }
+    }
+    merged
+}
+
+/// The forms keyword search found, as the snippet marks them «»: "the «payments» were…" → ["payments"]. What a
+/// preview marks besides the typed words (the stemmer matched "payments" for "payment").
+pub fn marked_words(snippet: &str) -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    let mut rest = snippet;
+    while let Some(start) = rest.find('«') {
+        let after = &rest[start + '«'.len_utf8()..];
+        let Some(end) = after.find('»') else { break };
+        let word = after[..end].trim();
+        if !word.is_empty() && !found.iter().any(|known| known.to_lowercase() == word.to_lowercase()) {
+            found.push(word.to_string());
+        }
+        rest = &after[end + '»'.len_utf8()..];
+    }
+    found
+}
+
+/// Byte ranges of `text` as UTF-16 offsets [start, end): how JavaScript counts a string's characters.
+pub fn utf16_ranges(text: &str, ranges: &[Range<usize>]) -> Vec<[usize; 2]> {
+    let mut out = Vec::with_capacity(ranges.len());
+    let (mut byte, mut unit) = (0usize, 0usize);
+    let mut chars = text.char_indices().peekable();
+    let mut advance = |to: usize, byte: &mut usize, unit: &mut usize| {
+        while let Some(&(at, c)) = chars.peek() {
+            if at >= to {
+                break;
+            }
+            *unit += c.len_utf16();
+            *byte = at + c.len_utf8();
+            chars.next();
+        }
+    };
+    for range in ranges {
+        advance(range.start, &mut byte, &mut unit);
+        let start = unit;
+        advance(range.end, &mut byte, &mut unit);
+        out.push([start, unit]);
+    }
+    out
+}
+
 /// One line from `text` around the first of `terms` it has, the terms marked « » as SQLite's snippet() marks them:
 /// the excerpt of a keyword match, from the text as written. None when none of the terms is in it.
 pub fn snippet(text: &str, terms: &[String], words: usize) -> Option<String> {
@@ -357,6 +417,22 @@ fn is_indic_consonant_or_nukta(value: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn preview_marks() {
+        use super::*;
+        let text = "Payments: the payment failed. Café payments, CAFE.";
+        let words: Vec<String> = ["payment", "payments", "cafe"].iter().map(|s| s.to_string()).collect();
+        let marked: Vec<&str> = mark_ranges(&words, text).iter().map(|r| &text[r.clone()]).collect();
+        assert_eq!(marked, ["Payments", "payment", "Café", "payments", "CAFE"]);
+        assert_eq!(marked_words("…the «payments» were «Paid» and «payments»…"), ["payments", "Paid"]);
+        // UTF-16 offsets: "é" is one unit, "𝄞" two.
+        let text = "é𝄞 cafe";
+        let ranges = mark_ranges(&["cafe".to_string()], text);
+        assert_eq!(utf16_ranges(text, &ranges), [[4, 8]]);
+        // A word shorter than two letters marks nothing.
+        assert!(mark_ranges(&["a".to_string()], "a b a").is_empty());
+    }
+
     #[test]
     fn garbled_page_text_is_noticed() {
         // Glyph order: the vowel sign ি (U+09BF) before its consonant, over and over.

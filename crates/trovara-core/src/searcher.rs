@@ -41,11 +41,18 @@ pub struct SearchHit {
     pub modified: f64,
     pub size: i64,
     pub info: Info,
+    /// The forms keyword search found in the file, as written ("payments" for "payment"): what previews mark besides
+    /// the query's words (PRD F-PRE-02).
+    pub found: Vec<String>,
 }
 
 /// How much finding the query's words counts against meaning. Code's words count for less: they're everywhere in code.
 pub const WORD_WEIGHT: f64 = 2.0;
 pub const CODE_WORD_WEIGHT: f64 = 1.0;
+/// The bonus for a file whose own name holds the query's words (at full coverage; it falls with its square). People
+/// name files for what they are: "PAN_Card_Front_View.jpeg" is what "pan card" means, even when the picture's meaning
+/// match is weak. With the words' own bonus it puts such a file above meaning matches up to z ≈ 6.
+pub const NAME_WEIGHT: f64 = 4.0;
 /// Segments that stand out by at least this many standard deviations count as meaning matches.
 pub const Z_GATE: f64 = 2.0;
 
@@ -261,6 +268,7 @@ impl Searcher {
         }
         let mut words: Vec<(i64, i64, Option<String>)> = Vec::new(); // (file, segment, snippet)
         let mut coverage: HashMap<i64, f64> = HashMap::new(); // share of the query's words found anywhere in the file
+        let mut name_coverage: HashMap<i64, f64> = HashMap::new(); // share of them in the file's name
         if !patterns.is_empty() {
             let mut seen = HashSet::new();
             let mut statement = self.store.db.prepare(
@@ -290,15 +298,19 @@ impl Searcher {
                     .collect::<Vec<_>>()
                     .join(",");
                 let mut segment_file: HashMap<i64, i64> = HashMap::new();
+                let mut names: HashSet<i64> = HashSet::new(); // the candidates' name segments
                 {
                     let mut statement = self.store.db.prepare(&format!(
-                        "SELECT id, file FROM segments WHERE file IN ({files})"
+                        "SELECT id, file, kind = 'name' FROM segments WHERE file IN ({files})"
                     ))?;
-                    for row in statement
-                        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
-                    {
-                        let (segment, file) = row?;
+                    for row in statement.query_map([], |row| {
+                        Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, bool>(2)?))
+                    })? {
+                        let (segment, file, name) = row?;
                         segment_file.insert(segment, file);
+                        if name {
+                            names.insert(segment);
+                        }
                     }
                 }
                 let (low, high) = (
@@ -335,6 +347,14 @@ impl Searcher {
                     for file in holding {
                         *coverage.entry(file).or_default() += 1.0 / patterns.len() as f64;
                     }
+                    let in_name: HashSet<i64> = found
+                        .iter()
+                        .filter(|segment| names.contains(segment))
+                        .filter_map(|segment| segment_file.get(segment).copied())
+                        .collect();
+                    for file in in_name {
+                        *name_coverage.entry(file).or_default() += 1.0 / patterns.len() as f64;
+                    }
                 }
             }
         }
@@ -366,6 +386,12 @@ impl Searcher {
                 let z = best.get(&file).map_or(0.0, |b| b.0).max(0.0);
                 let mut score = meaning_weight * z
                     + words_weight * coverage.get(&file).copied().unwrap_or(0.0).powf(1.5);
+                // Most of the words in its name: the file is named for what was asked (not for code, whose file
+                // names are its identifiers and are matched as such).
+                let named = name_coverage.get(&file).copied().unwrap_or(0.0);
+                if !self.is_code && named >= 0.5 {
+                    score += NAME_WEIGHT * named.powi(2);
+                }
                 if self
                     .file_kind
                     .get(&file)
@@ -376,12 +402,17 @@ impl Searcher {
                 (file, score)
             })
             .collect();
-        scored.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-
         let mut word_rank: HashMap<i64, (usize, i64, Option<String>)> = HashMap::new();
         for (rank, (file, segment, quoted)) in words.into_iter().enumerate() {
             word_rank.entry(file).or_insert((rank + 1, segment, quoted));
         }
+        // Equal scores (every file with all the words, before the meaning results are in) go by keyword rank: BM25,
+        // where a match in the file's name weighs three times one in its text. Not by when the file was indexed: a
+        // search for "voter card" listed older PDFs that mention a card above "Front_View of Voter_Card.png".
+        let keyword_order = |file: &i64| word_rank.get(file).map_or(usize::MAX, |(rank, _, _)| *rank);
+        scored.sort_by(|a, b| {
+            b.1.total_cmp(&a.1).then(keyword_order(&a.0).cmp(&keyword_order(&b.0))).then(a.0.cmp(&b.0))
+        });
         let mut hits = Vec::new();
         for (file, score) in scored.into_iter().take(options.limit) {
             let semantic = best.get(&file).copied();
@@ -536,7 +567,18 @@ impl Searcher {
             info: info
                 .and_then(|json| serde_json::from_str(&json).ok())
                 .unwrap_or_default(),
+            found: keyword
+                .and_then(|(_, _, text)| text.as_deref())
+                .map(crate::search_text::marked_words)
+                .unwrap_or_default(),
         })
+    }
+
+    /// The words of `text` that keyword search matches for the query's `terms`, as written: "months" and "Month" for
+    /// "month", "paid" never (PRD F-PRE-02). Decided by SQLite's own FTS5, with the index's tokenizer, so a preview
+    /// marks exactly what search matched, stemming and accents included.
+    pub fn matching_words(&self, text: &str, terms: &[String]) -> Result<Vec<String>> {
+        matching_words_with(&self.store.db, "temp.preview_words", text, terms)
     }
 
     /// The text of a page, a document's passage or a screenshot's OCR, as written: the preview shows the part of a
@@ -682,12 +724,76 @@ fn segment_kind(text: &str) -> SegmentKind {
         "frame" => SegmentKind::Frame,
         "lines" => SegmentKind::Lines,
         "cells" => SegmentKind::Cells,
+        "subtitle" => SegmentKind::Subtitle,
         _ => SegmentKind::Name,
     }
 }
 
+/// `Searcher::matching_words` without an index (the preview renderer's thread): its own in-memory SQLite.
+pub struct WordMatcher {
+    db: rusqlite::Connection,
+}
+
+impl WordMatcher {
+    pub fn new() -> Result<WordMatcher> {
+        Ok(WordMatcher { db: rusqlite::Connection::open_in_memory()? })
+    }
+
+    pub fn matching(&self, text: &str, terms: &[String]) -> Result<Vec<String>> {
+        matching_words_with(&self.db, "main.preview_words", text, terms)
+    }
+}
+
+/// The words of `text` keyword search matches for `terms`, using a scratch FTS5 table `table` on `db`.
+fn matching_words_with(db: &rusqlite::Connection, table: &str, text: &str, terms: &[String]) -> Result<Vec<String>> {
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut distinct: Vec<&str> = text
+        .split(|c: char| !crate::search_text::is_word_char(c))
+        .filter(|word| word.chars().count() >= 2)
+        .collect();
+    distinct.sort_unstable();
+    distinct.dedup();
+    distinct.truncate(20_000);
+    let name = table.rsplit('.').next().unwrap_or(table);
+    db.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS {table} USING fts5(w, tokenize = \"{}\"); DELETE FROM {table};",
+        crate::store::TOKENIZER
+    ))?;
+    {
+        let mut insert = db.prepare_cached(&format!("INSERT INTO {table}(w) VALUES (?)"))?;
+        for word in &distinct {
+            insert.execute([word])?;
+        }
+    }
+    let mut found: Vec<String> = Vec::new();
+    {
+        let mut select = db.prepare_cached(&format!("SELECT w FROM {table} WHERE {name} MATCH ?"))?;
+        for pattern in crate::query::patterns(terms, false) {
+            let words: Vec<String> = select.query_map([pattern], |row| row.get(0))?.collect::<Result<_>>()?;
+            found.extend(words);
+        }
+    }
+    db.execute_batch(&format!("DELETE FROM {table};"))?;
+    found.sort_unstable();
+    found.dedup();
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn matching_words_follow_keyword_search() {
+        let matcher = super::WordMatcher::new().unwrap();
+        let found = matcher
+            .matching("Twelve months. The Month's rent was paid; monthly fees.", &["month".to_string()])
+            .unwrap();
+        // Porter stemming: months and Month match month; monthly stems differently (search doesn't match it either).
+        assert_eq!(found, ["Month", "months"]);
+        assert!(matcher.matching("anything", &[]).unwrap().is_empty());
+    }
+
     use super::*;
     use crate::store::Candidate;
 
@@ -1045,6 +1151,7 @@ mod tests {
             modified: 0.0,
             size: 0,
             info: Info::new(),
+            found: Vec::new(),
         };
         assert_eq!(
             strong_count(&[hit(10.0), hit(6.0), hit(4.9), hit(4.0)], 0.5),
