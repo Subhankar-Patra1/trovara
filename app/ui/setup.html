@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Set Up Trovara</title>
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body>
+  <main>
+    <section class="page" id="welcome">
+      <div class="hero">
+        <img class="icon" src="icon.png" alt="">
+        <h1>Trovara</h1>
+        <p class="tagline">Describe it. Find it.</p>
+      </div>
+      <ul class="features">
+        <li><span class="tile"><svg viewBox="0 0 24 24"><path d="M4 5 H20 V19 H4 Z M4 16 L9 11 L13 15 L16 12 L20 16"/></svg></span><div><b>Screenshots and photos</b>
+          <span>“that payment error”, “the zebra”, “whiteboard from Tuesday”</span></div></li>
+        <li><span class="tile"><svg viewBox="0 0 24 24"><path d="M6 3 H14 L19 8 V21 H6 Z M14 3 V8 H19 M9 12 H16 M9 15 H16 M9 18 H13"/></svg></span><div><b>PDFs and documents</b>
+          <span>“the clause about pets in the lease”, “flight receipt”</span></div></li>
+        <li><span class="tile"><svg viewBox="0 0 24 24"><path d="M3 12 H5 M7 8 V16 M10 5 V19 M13 9 V15 M16 6 V18 M19 10 V14 M21 12 H22"/></svg></span><div><b>Moments inside audio and video</b>
+          <span>“where they talk about sleep”, “the part with the drums”</span></div></li>
+      </ul>
+      <p class="privacy">Everything is indexed and searched on this PC. Trovara downloads its AI model (865 MB) once;
+        after that it works offline, and nothing you index ever leaves your computer.</p>
+    </section>
+
+    <section class="page" id="folders" hidden>
+      <h2>What should Trovara search?</h2>
+      <p class="subtitle">Pick folders. You can change this anytime from the tray: Choose Folders…</p>
+      <div class="folders" id="folder-list"></div>
+      <button class="link" id="add-folder">Add Folder…</button>
+      <p class="note">Trovara only reads files: it never changes, moves or uploads them.</p>
+    </section>
+
+    <section class="page" id="shortcut" hidden>
+      <h2>Search from anywhere</h2>
+      <p class="subtitle">Press the shortcut in any app to open the search panel, and describe what you remember.</p>
+      <div class="recorder">
+        <div class="keys" id="keys"></div>
+        <button id="change-key">Change…</button>
+        <button class="link" id="reset-key">Reset</button>
+      </div>
+      <p class="note" id="key-note"></p>
+      <h3>In the search panel</h3>
+      <dl class="panel-keys">
+        <dt>Enter</dt><dd>opens the file (at the page or moment, where its app can)</dd>
+        <dt>Ctrl+Enter</dt><dd>shows it in Explorer</dd>
+        <dt>Ctrl+C</dt><dd>copies the file, to paste anywhere</dd>
+        <dt>Ctrl+O</dt><dd>opens the search window: more results, a grid for pictures</dd>
+        <dt>↑ ↓</dt><dd>move between results</dd>
+        <dt>Esc</dt><dd>closes the panel</dd>
+      </dl>
+    </section>
+
+    <section class="page" id="catchup" hidden>
+      <h2>Catch up fast after a restart</h2>
+      <p class="subtitle">While Trovara runs it sees every change at once. When it starts, it has to find what changed
+        while it was off: by looking through every folder (a few seconds to minutes), or, with fast catch-up, by asking
+        Windows' change journal (well under a second).</p>
+      <label class="option">
+        <input type="checkbox" id="fast-catch-up" checked>
+        <div>
+          <b>Turn on fast catch-up</b>
+          <span>Windows asks for administrator permission once, to set up a small reader that only lists which files
+            changed in your folders. You can turn it off in Settings.</span>
+        </div>
+      </label>
+    </section>
+
+    <section class="page" id="ready" hidden>
+      <div class="hero">
+        <img class="icon" src="icon.png" alt="">
+        <h2>You're all set</h2>
+      </div>
+      <p class="subtitle centered" id="ready-text">Trovara lives in the tray, which shows how indexing is going. Files
+        are searchable by name at once, and by what's in them as they're indexed.</p>
+    </section>
+  </main>
+
+  <footer>
+    <span class="model"><span id="model"></span>
+      <button class="link small" id="model-retry" hidden>Try Again</button>
+      <button class="link small" id="model-files" hidden>Use Files…</button></span>
+    <span class="buttons">
+      <button id="back" hidden>Back</button>
+      <button class="primary" id="next">Continue</button>
+    </span>
+  </footer>
+  <script src="hotkey.js"></script>
+  <script src="setup.js"></script>
+</body>
+</html>

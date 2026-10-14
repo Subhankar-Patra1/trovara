@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Trovara Settings</title>
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body class="settings">
+  <main>
+    <h2>Shortcut</h2>
+    <div class="card">
+      <div class="line-item">
+        <div class="label"><b>Open the search panel</b><span id="key-note">Works in any app.</span></div>
+        <div class="keys" id="keys"></div>
+        <button id="change-key">Change…</button>
+        <button class="link" id="reset-key">Reset</button>
+      </div>
+    </div>
+
+    <h2>Folders</h2>
+    <div class="card" id="folder-list"></div>
+    <div class="row-buttons"><button id="add-folder">Add Folder…</button></div>
+
+    <h2>Left out</h2>
+    <div class="card">
+      <div id="skipped-list"></div>
+      <div class="line-item">
+        <div class="label"><b>File types</b><span>Extensions to leave out, separated by commas: heic, txt, mov</span></div>
+        <input type="text" id="skip-types" spellcheck="false" placeholder="none">
+      </div>
+    </div>
+    <div class="row-buttons"><button id="add-skipped">Leave Out a Folder…</button></div>
+
+    <h2>Code</h2>
+    <div class="card">
+      <div class="line-item">
+        <div class="label"><b>Search code</b><span>Type <b>code:</b> in the search panel, then what the code does
+          or a name in it. Code never shows up in other searches. Off: no code is read.</span></div>
+        <input type="checkbox" id="code-on">
+      </div>
+      <div id="code-parts">
+        <div id="code-folder-list"></div>
+        <div class="line-item">
+          <div class="label"><b>Open code in</b><span id="editor-note">Trovara opens code at the line that matched.</span></div>
+          <select id="editor"></select>
+        </div>
+        <div class="line-item">
+          <div class="label"><b>Turn off code search</b><span>Stops reading code and deletes the code index.</span></div>
+          <button id="code-off">Turn Off Code Search…</button>
+        </div>
+      </div>
+    </div>
+    <div class="row-buttons" id="code-buttons">
+      <button id="add-code-folder">Add Code Folder…</button>
+      <button id="add-code-skipped">Leave Out a Folder…</button>
+    </div>
+    <div class="card" id="code-skipped-card"><div id="code-skipped-list"></div></div>
+
+    <h2>Indexing</h2>
+    <div class="card">
+      <div class="line-item">
+        <div class="label"><b>Pause indexing</b><span>New files wait until you resume. Search still works.</span></div>
+        <input type="checkbox" id="paused">
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Index on battery</b><span>Off: the backlog waits for mains power (new files are always
+          indexed). Battery Saver always pauses the backlog.</span></div>
+        <input type="checkbox" id="on-battery">
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Wait during games, videos and presentations</b><span>The backlog pauses while a
+          fullscreen app has the screen.</span></div>
+        <input type="checkbox" id="pause-fullscreen">
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Index only at set hours</b><span>For the backlog; new files are indexed at any time.</span></div>
+        <span class="hours" id="hours" hidden><input type="time" id="hours-from"> to <input type="time" id="hours-to"></span>
+        <input type="checkbox" id="hours-on">
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Speed</b><span id="priority-note"></span></div>
+        <select id="priority">
+          <option value="auto">Automatic</option>
+          <option value="normal">Fastest</option>
+          <option value="low">Gentle</option>
+          <option value="eco">Most efficient</option>
+        </select>
+      </div>
+    </div>
+
+    <h2>Starting up</h2>
+    <div class="card">
+      <div class="line-item">
+        <div class="label"><b>Start Trovara when you sign in</b><span>So the shortcut always works.</span></div>
+        <input type="checkbox" id="launch-at-login">
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Fast catch-up after a restart</b><span id="catchup-note">Checking…</span></div>
+        <button id="catchup" disabled>…</button>
+      </div>
+      <div class="line-item">
+        <div class="label"><b>Check for updates</b><span id="update-note">Once a day. Nothing about your files is sent.</span></div>
+        <button id="check-now">Check Now</button>
+        <input type="checkbox" id="check-updates">
+      </div>
+    </div>
+
+    <h2>Model</h2>
+    <div class="card">
+      <div class="line-item">
+        <div class="label"><b>EmbeddingGemma 2</b><span id="model">Checking…</span></div>
+        <button id="model-retry" hidden>Try Again</button>
+        <button id="model-files" hidden>Use Files…</button>
+      </div>
+    </div>
+
+    <h2>About</h2>
+    <div class="card">
+      <div class="line-item">
+        <div class="label"><b id="version">Trovara</b><span id="index-place"></span></div>
+        <button id="licenses">Licenses</button>
+        <button id="open-logs">Open Logs</button>
+      </div>
+    </div>
+  </main>
+  <footer>
+    <span class="model" id="saved"></span>
+    <span class="buttons"><button class="primary" id="done">Done</button></span>
+  </footer>
+  <script src="hotkey.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>
