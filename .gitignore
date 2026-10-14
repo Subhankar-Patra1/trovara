@@ -18,3 +18,15 @@ app/node_modules/
 
 # Claude Code skills and settings for this PC (not part of Trovara)
 /.claude/
+
+# Video work: demo films, renders, recordings (kept on this PC, not in the repo)
+/output/
+/trovara-film/
+.hyperframes/
+*.mp4
+*.mov
+*.webm
+*.mkv
+*.avi
+# …except the README's demo film
+!/assets/trovara-demo-1080p.mp4
