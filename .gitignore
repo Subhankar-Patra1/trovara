@@ -28,5 +28,3 @@ app/node_modules/
 *.webm
 *.mkv
 *.avi
-# …except the README's demo film
-!/assets/trovara-demo-1080p.mp4
