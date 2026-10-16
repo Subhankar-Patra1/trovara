@@ -10,6 +10,11 @@
 </p>
 
 <p align="center">
+  <a href="https://trovara.vercel.app/"><b>Website</b></a> ·
+  <a href="https://github.com/Subhankar-Patra1/trovara/releases/latest"><b>Download</b></a>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6" alt="Windows 10 and 11">
   <img src="https://img.shields.io/badge/status-beta-orange" alt="Beta">
