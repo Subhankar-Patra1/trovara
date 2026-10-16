@@ -28,3 +28,6 @@ app/node_modules/
 *.webm
 *.mkv
 *.avi
+
+# The landing page (its own project, not part of the app)
+/landing-page/
