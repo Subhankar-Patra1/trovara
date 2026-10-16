@@ -72,7 +72,7 @@ details and inspect the matching content before opening the file.
 
 ## Install
 
-1. Download `Trovara_<version>_x64-setup.exe` from [Releases](https://github.com/Subhankar-Patra1/trovara/releases).
+1. Download `Trovara-Setup-<version>.exe` from [Releases](https://github.com/Subhankar-Patra1/trovara/releases).
 2. Run it. It installs for you only, so no administrator rights are needed. On the last page, keep
    **Create desktop shortcut** ticked if you want an icon on the desktop.
 3. Setup asks which folders to search, then downloads the model once (865 MB) and starts reading your files in the
@@ -393,7 +393,7 @@ target\release\trovara.exe
 To build the installer you also need Node.js, for the Tauri CLI:
 
 ```powershell
-scripts\release.ps1         # → target\release\bundle\nsis\Trovara_<version>_x64-setup.exe (~16 MB)
+scripts\release.ps1         # → target\release\bundle\nsis\Trovara-Setup-<version>.exe (~16 MB)
 ```
 
 <details>

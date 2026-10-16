@@ -14,7 +14,7 @@
 # The update signing key: %USERPROFILE%\.trovara\updater.key (+ updater.password), made once with
 # `npx tauri signer generate`. Never commit it: whoever has it can ship updates to every Trovara.
 
-#   Update tests only: -Version 1.0.0-beta.2 builds as another version; -AllowHttp lets the feed be plain http (a
+#   Update tests only: -Version 0.1.1 builds as another version; -AllowHttp lets the feed be plain http (a
 #   local server). Never ship a build made with -AllowHttp.
 param(
     [string]$UpdateUrl = "",
@@ -114,13 +114,21 @@ try { Run "tauri build" { npx tauri build @configArgs } } finally {
 Step "Result"
 $bundle = Join-Path $release "bundle\nsis"
 $installer = Get-ChildItem $bundle -Filter "*-setup.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+# Named for people: Trovara-Setup-<version>.exe (Tauri's is Trovara_<version>_x64-setup.exe). The update signature
+# covers the file's bytes, not its name, so it's renamed with it; latest.json below uses the new name.
+$version = if ($Version) { $Version } else { (Get-Content (Join-Path $app "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json).version }
+$named = Join-Path $bundle "Trovara-Setup-$version.exe"
+if ($installer.FullName -ne $named) {
+    Move-Item -Force $installer.FullName $named
+    if (Test-Path "$($installer.FullName).sig") { Move-Item -Force "$($installer.FullName).sig" "$named.sig" }
+    $installer = Get-Item $named
+}
 $megabytes = [math]::Round($installer.Length / 1MB, 1)
 $budget = if ($megabytes -gt 60) { " (over the 60 MB budget, NFR-06)" } else { " (budget 60 MB)" }
 Write-Host "$($installer.FullName): $megabytes MB$budget"
 $signature = "$($installer.FullName).sig"
 if ($UpdateUrl -and (Test-Path $signature)) {
     if (-not $DownloadBase) { throw "-DownloadBase is needed with -UpdateUrl (where the installer will be downloadable)" }
-    $version = if ($Version) { $Version } else { (Get-Content (Join-Path $app "src-tauri\tauri.conf.json") -Raw | ConvertFrom-Json).version }
     $feed = [ordered]@{
         version = $version
         notes = $Notes
