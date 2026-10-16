@@ -177,6 +177,19 @@ impl Searcher {
         Ok(())
     }
 
+    /// Takes the vectors (and the files' kinds) another searcher of the same index loaded: the search service loads
+    /// them on a thread of its own, so keyword search isn't kept waiting meanwhile.
+    pub fn adopt_vectors(&mut self, other: Searcher) {
+        self.matrix = other.matrix;
+        self.row_file = other.row_file;
+        self.row_segment = other.row_segment;
+        self.row_modality = other.row_modality;
+        self.row_sets_scale = other.row_sets_scale;
+        self.file_kind = other.file_kind;
+        self.segment_count = other.segment_count;
+        self.vector_source = other.vector_source;
+    }
+
     /// Frees the vectors' memory; keyword search keeps working.
     pub fn release_vectors(&mut self) {
         self.matrix = None;
@@ -271,23 +284,23 @@ impl Searcher {
         let mut name_coverage: HashMap<i64, f64> = HashMap::new(); // share of them in the file's name
         if !patterns.is_empty() {
             let mut seen = HashSet::new();
+            // Ranked by FTS5 alone; the snippets are made later for the hits shown only. FTS5's own snippet() re-runs
+            // the whole match for every row: with a short prefix ("ca*", 47k segments) 100 snippets took 850 ms.
             let mut statement = self.store.db.prepare(
-                "SELECT s.file, s.id, snippet(fts, 1, '«', '»', '…', 12), fts.original FROM fts
-                 JOIN segments s ON s.id = fts.rowid
-                 WHERE fts MATCH ? ORDER BY bm25(fts, 3.0, 1.0) LIMIT 1000",
+                "SELECT rowid FROM fts WHERE fts MATCH ? ORDER BY bm25(fts, 3.0, 1.0) LIMIT 1000",
             )?;
+            let mut file_of = self.store.db.prepare_cached("SELECT file FROM segments WHERE id = ?")?;
             let mut rows = statement.query([self.ranked_patterns(&patterns)?.join(" OR ")])?;
             while let Some(row) = rows.next()? {
-                let file: i64 = row.get(0)?;
-                if words.len() >= 100 || !allowed(file) || !seen.insert(file) {
+                if words.len() >= 100 {
+                    break;
+                }
+                let segment: i64 = row.get(0)?;
+                let Some(file) = file_of.query_row([segment], |row| row.get::<_, i64>(0)).optional()? else { continue };
+                if !allowed(file) || !seen.insert(file) {
                     continue;
                 }
-                // Text that normalizing changed is quoted as written (with its hamza, harakat, joiners).
-                let original: Option<String> = row.get(3)?;
-                let quoted = original
-                    .and_then(|text| snippet(&text, &terms, 12))
-                    .or(row.get(2)?);
-                words.push((file, row.get(1)?, quoted));
+                words.push((file, segment, None));
             }
             if !words.is_empty() {
                 // Which of the candidates' segments (≤ 100 files) hold each word. Driven from those segments, not from
@@ -317,28 +330,33 @@ impl Searcher {
                     segment_file.keys().copied().min().unwrap_or(0),
                     segment_file.keys().copied().max().unwrap_or(0),
                 );
-                let ids = segment_file
+                let ids = if segment_file.len() > 2_000 { String::new() } else { segment_file
                     .keys()
                     .map(i64::to_string)
                     .collect::<Vec<_>>()
-                    .join(",");
+                    .join(",") };
                 // An exact word seeks each segment (fast). A prefix ("not*") can't: FTS5 builds its whole match list
                 // for every lookup, so it's read once, in rowid order within the candidates' range.
-                let mut exact = self.store.db.prepare(&format!(
-                    "SELECT rowid FROM fts WHERE fts MATCH ?1 AND rowid IN ({ids})"
-                ))?;
+                let seek = segment_file.len() <= 2_000;
+                let mut exact = if seek {
+                    Some(self.store.db.prepare(&format!("SELECT rowid FROM fts WHERE fts MATCH ?1 AND rowid IN ({ids})"))?)
+                } else {
+                    None
+                };
                 let mut prefix = self.store.db.prepare(
                     "SELECT rowid FROM fts WHERE fts MATCH ?1 AND rowid BETWEEN ?2 AND ?3",
                 )?;
+                // …but only while the candidates have few segments: seeking each of 30k (long videos and PDFs) cost 600 ms
+                // for one word, where reading the word's whole match list takes under a millisecond.
                 for pattern in &patterns {
-                    let found: Vec<i64> = if pattern.ends_with('*') {
+                    let found: Vec<i64> = if pattern.ends_with('*') || exact.is_none() {
                         prefix
                             .query_map(rusqlite::params![pattern, low, high], |row| row.get(0))?
                             .collect::<Result<_>>()?
+                    } else if let Some(exact) = exact.as_mut() {
+                        exact.query_map([pattern], |row| row.get(0))?.collect::<Result<_>>()?
                     } else {
-                        exact
-                            .query_map([pattern], |row| row.get(0))?
-                            .collect::<Result<_>>()?
+                        Vec::new()
                     };
                     let holding: HashSet<i64> = found
                         .iter()
@@ -402,6 +420,12 @@ impl Searcher {
                 (file, score)
             })
             .collect();
+        let starts: Vec<String> = patterns
+            .iter()
+            .filter(|p| p.ends_with('*'))
+            .map(|p| p.trim_end_matches('*').trim_matches('"').to_lowercase())
+            .filter(|p| !p.is_empty())
+            .collect();
         let mut word_rank: HashMap<i64, (usize, i64, Option<String>)> = HashMap::new();
         for (rank, (file, segment, quoted)) in words.into_iter().enumerate() {
             word_rank.entry(file).or_insert((rank + 1, segment, quoted));
@@ -416,7 +440,9 @@ impl Searcher {
         let mut hits = Vec::new();
         for (file, score) in scored.into_iter().take(options.limit) {
             let semantic = best.get(&file).copied();
-            let keyword = word_rank.get(&file);
+            // The words in context, from the passage's own text (as written: with its hamza, harakat, joiners).
+            let keyword = word_rank.get(&file).map(|(rank, segment, _)| (*rank, *segment, self.quote(*segment, &terms, &starts)));
+            let keyword = keyword.as_ref();
             // Point at the best meaning segment if it stands out; else at the segment the words matched.
             let use_meaning =
                 semantic.is_some_and(|(z, _, _)| z >= options.z_gate || keyword.is_none());
@@ -577,6 +603,36 @@ impl Searcher {
     /// The words of `text` that keyword search matches for the query's `terms`, as written: "months" and "Month" for
     /// "month", "paid" never (PRD F-PRE-02). Decided by SQLite's own FTS5, with the index's tokenizer, so a preview
     /// marks exactly what search matched, stemming and accents included.
+    /// The snippet of `segment` around the query's words (marked « »), in the forms keyword search matched
+    /// ("payments" for "payment"); None when the words aren't in its text (a match in the file's name).
+    fn quote(&self, segment: i64, terms: &[String], starts: &[String]) -> Option<String> {
+        let text: String = self
+            .store
+            .db
+            .query_row("SELECT coalesce(original, body) FROM fts WHERE rowid = ?", [segment], |row| row.get(0))
+            .optional()
+            .ok()
+            .flatten()?;
+        // The words as typed usually do (a word's start: "payment" marks "payments"); only when they don't, the forms
+        // FTS5 matched ("studies" for "study"), which cost a scratch index per passage.
+        // A word matched by its start ("grok*" while it's typed, or a word in no file) marks the whole words it starts
+        // ("Grok4"), found by a scan of the text.
+        let mut typed = terms.to_vec();
+        if !starts.is_empty() {
+            for word in text.split(|c: char| !crate::search_text::is_word_char(c)) {
+                let folded = word.to_lowercase();
+                if starts.iter().any(|start| folded.starts_with(start.as_str())) && !typed.iter().any(|t| t == word) {
+                    typed.push(word.to_string());
+                }
+            }
+        }
+        snippet(&text, &typed, 12).or_else(|| {
+            let mut words = self.matching_words(&text, terms).unwrap_or_default();
+            words.extend(terms.iter().cloned());
+            snippet(&text, &words, 12)
+        })
+    }
+
     pub fn matching_words(&self, text: &str, terms: &[String]) -> Result<Vec<String>> {
         matching_words_with(&self.store.db, "temp.preview_words", text, terms)
     }
