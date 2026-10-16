@@ -16,7 +16,8 @@
 //!   {"op":"folders","roots":[…],"skipped":[…],"types":[…],"code_roots":[…],"code_skipped":[…]} → {"ok":true}: what
 //!       the panel may show
 //!   {"op":"code_off"}            → {"ok":true}: deletes the code index ("Turn Off Code Search…")
-//!   {"op":"prewarm"}             → {"ok":true}: starts the encoder and loads the vectors (the panel is opening)
+//!   {"op":"prewarm"}             → {"ok":true} at once: the encoder and the vectors load in the background (the
+//!                                  panel is opening); searches meanwhile are words only, with "warming": true
 //!   {"op":"status"}              → {"encoder":"stopped|starting|ready|unavailable","vectors":n}
 //!   {"op":"quit"}                → {"ok":true}, then exit
 //! After `--encoder-idle` seconds without a query the encoder and the vectors are freed; keyword search keeps working.
@@ -51,6 +52,8 @@ struct State {
     code_roots: Vec<String>,
     code_skipped: Vec<String>,
     log: PathBuf,
+    /// The encoder and the vectors are loading on a thread of their own (`warm`): keyword searches go on meanwhile.
+    warming: bool,
 }
 
 impl State {
@@ -61,6 +64,9 @@ impl State {
         let prompt = if code { Prompts::code_query(text) } else { Prompts::query(text) };
         if let Some(cached) = self.cache.get(&prompt) {
             return Some(cached.clone());
+        }
+        if self.encoder.is_none() && self.warming {
+            return None; // it's on its way: this search is words only, and the panel asks again once it's ready
         }
         let encoder = self.running_encoder()?;
         match encoder.embed_texts(std::slice::from_ref(&prompt)) {
@@ -169,6 +175,9 @@ impl State {
                 if let Some(corrected) = corrected {
                     reply["corrected"] = json!(corrected);
                 }
+                if want_meaning && vector.is_none() && self.warming {
+                    reply["warming"] = json!(true);
+                }
                 Ok(reply)
             }
             "embed_ahead" => {
@@ -260,14 +269,6 @@ impl State {
                     self.code_skipped = skipped;
                 }
                 Ok(json!({"ok": true}))
-            }
-            "prewarm" => {
-                self.last_query = Instant::now();
-                self.running_encoder();
-                if !self.searcher.vectors_loaded() {
-                    self.searcher.reload().map_err(|e| e.to_string())?;
-                }
-                Ok(json!({"ok": true, "encoder": self.encoder_state, "vectors": self.searcher.vector_count()}))
             }
             "status" => Ok(json!({
                 "encoder": self.encoder_state,
@@ -392,6 +393,7 @@ pub fn serve(args: &[String]) -> Result<(), String> {
         code_roots: crate::index::values(args, "--code-root"),
         code_skipped: crate::index::values(args, "--code-exclude"),
         log: paths::logs().join("search.log"),
+        warming: false,
     }));
     let renders = Arc::new(Renders { folder: previews, done: Mutex::new(HashMap::new()), slots: Mutex::new(2), free: Condvar::new() });
 
@@ -424,6 +426,33 @@ pub fn serve(args: &[String]) -> Result<(), String> {
             emit(json!({"id": id, "ok": true}));
             break;
         }
+        if op == "prewarm" {
+            // The panel is opening: start loading the encoder and the vectors, and answer at once. Loading them here
+            // took 1–3 s after the PC had been idle (the model, and 126k vectors read back from disk), and every
+            // keystroke's keyword search waited behind it.
+            let start = {
+                let mut state = state.lock().unwrap_or_else(|p| p.into_inner());
+                state.last_query = Instant::now();
+                let needed = state.encoder.is_none() || !state.searcher.vectors_loaded();
+                if needed && !state.warming {
+                    state.warming = true;
+                    if state.encoder.is_none() {
+                        state.encoder_state = "starting";
+                    }
+                    true
+                } else {
+                    false
+                }
+            };
+            if start {
+                let state = state.clone();
+                let folder = index_folder.clone();
+                std::thread::spawn(move || warm(&state, &folder));
+            }
+            let encoder = state.lock().unwrap_or_else(|p| p.into_inner()).encoder_state;
+            emit(json!({"id": id, "ok": true, "encoder": encoder}));
+            continue;
+        }
         if op == "render" {
             {
                 let mut slots = renders.slots.lock().unwrap();
@@ -450,6 +479,44 @@ pub fn serve(args: &[String]) -> Result<(), String> {
         emit(reply);
     }
     Ok(())
+}
+
+/// Loads the encoder and the vectors without holding the service's lock, then hands them over.
+fn warm(state: &Arc<Mutex<State>>, folder: &Path) {
+    let (need_encoder, need_vectors, log) = {
+        let state = state.lock().unwrap_or_else(|p| p.into_inner());
+        (state.encoder.is_none(), !state.searcher.vectors_loaded(), state.log.clone())
+    };
+    if need_encoder {
+        emit(json!({"event": "encoder", "state": "starting"}));
+    }
+    let started = Instant::now();
+    let encoder = need_encoder.then(|| Models::locate().and_then(|models| Embedder::new(&models, true, Some(&log))).map_err(|e| e.to_string()));
+    let vectors = if need_vectors {
+        IndexStore::open(folder, paths::MAIN_INDEX_FILE).and_then(|store| Searcher::new(store, true)).ok()
+    } else {
+        None
+    };
+    let mut state = state.lock().unwrap_or_else(|p| p.into_inner());
+    match encoder {
+        Some(Ok(encoder)) if state.encoder.is_none() => {
+            emit(json!({"event": "encoder", "state": "ready", "seconds": started.elapsed().as_secs_f64(), "device": encoder.device}));
+            state.encoder = Some(encoder);
+            state.encoder_state = "ready";
+        }
+        Some(Err(error)) => {
+            state.encoder_state = "unavailable";
+            emit(json!({"event": "encoder", "state": "unavailable", "error": error}));
+        }
+        _ => {}
+    }
+    if let Some(vectors) = vectors {
+        if !state.searcher.vectors_loaded() {
+            state.searcher.adopt_vectors(vectors);
+        }
+    }
+    state.warming = false;
+    state.last_query = Instant::now();
 }
 
 /// The words a preview marks: the query's own (`q`, as keyword search splits it) and the forms its search found

@@ -93,7 +93,9 @@ function queryChanged() {
       .then((reply) => {
         if (generation !== state.generation) return;
         state.finalGeneration = generation;
-        show(reply, text, reply.meaning ? "meaning" : "wordsOnly");
+        // Meaning still warming up (the panel just opened after a while): words for now, meaning once it's ready.
+        if (reply.warming) state.encoder = "starting";
+        show(reply, text, reply.meaning ? "meaning" : reply.warming ? "words" : "wordsOnly");
         if (debugPending) report();
       })
       .catch(failed);
@@ -1015,7 +1017,9 @@ tauri.event.listen("helper", ({ payload }) => {
   const { from, event } = payload;
   if (from === "search" && event.event === "encoder") {
     state.encoder = event.state;
-    if (state.phase !== "empty") renderFooter();
+    // Ready while words-only results show for what was typed: search it again, now with meaning.
+    if (event.state === "ready" && state.phase === "words" && $query.value.trim()) queryChanged();
+    else if (state.phase !== "empty") renderFooter();
   }
   if (from === "index") {
     if ((event.event === "file" || event.event === "rest") && event.total) {
