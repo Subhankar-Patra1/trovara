@@ -1,6 +1,6 @@
 [package]
 name = "trovara-app"
-version = "1.0.0-beta.1"
+version = "0.1.0"
 description = "Trovara: the tray icon, the hotkey, the search panel and window, setup and settings, over trovara-helper"
 edition = "2021"
 publish = false
