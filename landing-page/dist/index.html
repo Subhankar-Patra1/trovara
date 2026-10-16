@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Describe what you remember. Trovara finds the matching image, PDF page, recording, video moment, or source code in your local Windows files.">
+  <meta name="theme-color" content="#151517">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Trovara — Describe it. Find it.">
+  <meta property="og:description" content="Search your local files by what they contain. Made for Windows. Files and searches stay on your PC.">
+  <meta property="og:image" content="https://trovara-file-search.fabledmacaw2.chatgpt.site/assets/social-card.jpg">
+  <meta property="og:url" content="https://trovara-file-search.fabledmacaw2.chatgpt.site/">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="assets/logo.png" type="image/png">
+  <link rel="preload" href="assets/manrope.ttf" as="font" type="font/ttf" crossorigin>
+  <link rel="preload" href="assets/instrument-sans.ttf" as="font" type="font/ttf" crossorigin>
+  <title>Trovara - Describe it. Find it.</title>
+  <script>
+    (()=>{let mode='system';try{mode=localStorage.getItem('trovara-theme')||'system';}catch{}if(!['light','dark','system'].includes(mode))mode='system';const theme=mode==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):mode;document.documentElement.dataset.theme=theme;document.documentElement.dataset.themeMode=mode;document.documentElement.style.colorScheme=theme;})();
+  </script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="design.css">
+  <link rel="stylesheet" href="refinements.css">
+  <link rel="stylesheet" href="updates.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div id="site"></div>
+  <noscript><main class="no-script"><img src="assets/logo.png" width="80" height="80" alt="Trovara"><h1>Describe it. Find it.</h1><p>Trovara searches local Windows files by their contents. JavaScript enables the interactive sample searches.</p><a href="https://github.com/Subhankar-Patra1/trovara/releases">View Windows releases</a></main></noscript>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

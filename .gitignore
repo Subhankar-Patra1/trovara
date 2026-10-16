@@ -29,5 +29,7 @@ app/node_modules/
 *.mkv
 *.avi
 
-# The landing page (its own project, not part of the app)
-/landing-page/
+# The landing page's own videos are part of the site
+!/landing-page/dist/assets/*.mp4
+# Its test scripts stay on this PC
+/landing-page/scripts/
